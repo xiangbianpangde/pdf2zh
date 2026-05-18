@@ -400,6 +400,21 @@ def ui_stop_api():
     return msg + "\n\n" + ui_status_api()
 
 
+def ui_open_output_dir():
+    """Open OUTPUT_ROOT in the OS file manager."""
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(OUTPUT_ROOT))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(OUTPUT_ROOT)])
+        else:
+            subprocess.Popen(["xdg-open", str(OUTPUT_ROOT)])
+        return f"已打开：{OUTPUT_ROOT}"
+    except Exception as e:
+        return f"打开失败：{e}\n手动复制路径：{OUTPUT_ROOT}"
+
+
 def build_ui():
     with gr.Blocks(title="PDF → 中文 Markdown") as app:
         gr.Markdown(
@@ -533,6 +548,21 @@ def build_ui():
                     interactive=False,
                 )
                 gr.Markdown("### 输出文件")
+                with gr.Row():
+                    out_dir_box = gr.Textbox(
+                        label="输出根目录（每个 PDF 的产物在 <pdf名>/auto/ 下）",
+                        value=str(OUTPUT_ROOT),
+                        interactive=False,
+                        scale=4,
+                    )
+                    open_dir_btn = gr.Button("📂 打开文件夹", scale=1)
+                    open_dir_status = gr.Textbox(
+                        label="操作结果",
+                        value="",
+                        interactive=False,
+                        visible=False,
+                    )
+                open_dir_btn.click(fn=ui_open_output_dir, outputs=[out_dir_box])
                 en_files = gr.File(
                     label="英文 Markdown（已完成）",
                     interactive=False,
@@ -556,7 +586,6 @@ def build_ui():
         )
 
         gr.Markdown(
-            f"输出根目录：`{OUTPUT_ROOT}`\n\n"
             "复用模式下，mineru-api 在首次批处理时启动（约 1 分钟加载模型），"
             "之后每个 PDF 都走 HTTP 提交、无重复加载开销。关闭 Gradio 时服务自动结束。"
         )
