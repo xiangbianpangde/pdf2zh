@@ -236,15 +236,26 @@ def run_workflow(pdf_files, md_files, do_convert, do_translate, reuse_server,
             zh_outputs.copy() if zh_outputs else None,
         )
 
-    pdf_list = _normalize_files(pdf_files) if do_convert else []
-    md_list = _normalize_files(md_files) if not do_convert else []
+    raw_pdfs = _normalize_files(pdf_files)
+    raw_mds = _normalize_files(md_files)
+
+    # Smart inference: if user uploaded MDs but no PDFs, switch off the convert step.
+    if do_convert and not raw_pdfs and raw_mds:
+        push(f"提示：未检测到 PDF，但上传了 {len(raw_mds)} 个 Markdown — "
+             "自动跳过 PDF → Markdown 步骤，直接翻译。")
+        do_convert = False
+
+    pdf_list = raw_pdfs if do_convert else []
+    md_list = raw_mds if not do_convert else []
 
     if do_convert and not pdf_list:
-        push("[ERROR] 请上传至少一个 PDF")
+        push("[ERROR] 请在 PDF 区上传至少一个 .pdf 文件。\n"
+             "       （如果你只想翻译已有的 Markdown，请取消勾选 'PDF → Markdown' "
+             "并把 .md 文件放到 Markdown 区）")
         yield snapshot()
         return
     if not do_convert and not md_list:
-        push("[ERROR] 未勾选 PDF→MD，需要上传至少一个英文 Markdown")
+        push("[ERROR] 未勾选 PDF → Markdown，则需要在 Markdown 区上传至少一个 .md 文件")
         yield snapshot()
         return
     if do_translate:
