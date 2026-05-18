@@ -1,11 +1,12 @@
 # pdf2zh
 
-把英文 PDF 论文转成保留格式的中文 Markdown：**MinerU**（PDF 解析）+ **DeepSeek**（翻译）。本地全程运行，PDF 不上传第三方。
+把英文 PDF 论文转成保留格式的中文 Markdown：**MinerU**（PDF 解析）+ 任意 **OpenAI 兼容**翻译模型（DeepSeek / Ollama / LM Studio / 自定义）。本地全程运行，PDF 不上传第三方。
 
 ## 特性
 
 - 📄 PDF → Markdown 保留 LaTeX 公式、表格、图片引用、章节层级
-- 🌐 DeepSeek 翻译保留 Markdown 语法、文献引用编号、专有名词
+- 🌐 翻译保留 Markdown 语法、文献引用编号、专有名词
+- 🔌 翻译后端可切换：DeepSeek 官方 / Ollama / LM Studio / 任意 OpenAI 兼容端点
 - 🚀 批量处理：一次拖多个 PDF
 - ⚡ 并发翻译：默认 8 并发（可调 1-32）
 - 🔥 模型常驻：MinerU 模型加载一次，整个会话复用
@@ -49,9 +50,13 @@ pip install --force-reinstall torch torchvision \
 python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-### DeepSeek API Key
+### 翻译后端
 
-在 [platform.deepseek.com](https://platform.deepseek.com) 申请 key，然后：
+支持任意 **OpenAI 兼容**接口。Web UI 里有"翻译后端预设"下拉框，命令行用 `--base-url` 和 `--model`。
+
+#### 选项 A：DeepSeek 官方（默认）
+
+在 [platform.deepseek.com](https://platform.deepseek.com) 申请 key：
 
 ```powershell
 # Windows PowerShell
@@ -60,6 +65,45 @@ $env:DEEPSEEK_API_KEY = "sk-..."
 # Linux / macOS
 export DEEPSEEK_API_KEY=sk-...
 ```
+
+| 项 | 值 |
+|---|---|
+| Base URL | `https://api.deepseek.com` |
+| 模型 | `deepseek-chat` / `deepseek-reasoner` |
+
+#### 选项 B：Ollama 本地
+
+[Ollama](https://ollama.com) 装好后拉一个适合翻译的中等模型：
+
+```bash
+ollama pull qwen2.5:14b        # 推荐，14B 中文好
+# 或更小：
+ollama pull qwen2.5:7b
+# 或更大（显存够的话）：
+ollama pull qwen2.5:32b
+```
+
+启动服务后保持后台：`ollama serve`（一般装好后自动起）。
+
+| 项 | 值 |
+|---|---|
+| Base URL | `http://localhost:11434/v1` |
+| 模型 | `qwen2.5:14b`（或你拉过的任何模型）|
+| API Key | 任意非空字符串（如 `ollama`）|
+
+#### 选项 C：LM Studio 本地
+
+[LM Studio](https://lmstudio.ai) 加载好模型后，进入 **Developer** 页签 → 启动 **Local Server**。
+
+| 项 | 值 |
+|---|---|
+| Base URL | `http://localhost:1234/v1` |
+| 模型 | 留空或 LM Studio 里显示的模型 ID |
+| API Key | 任意非空字符串 |
+
+#### 选项 D：自定义
+
+任何 OpenAI 兼容的端点都可以填进 `--base-url`（例如 OpenAI 官方、SiliconFlow、火山方舟、智谱、本地 vLLM 等）。
 
 ---
 
@@ -86,14 +130,28 @@ python app.py
 ### B. 命令行
 
 ```bash
-# 全流程：PDF → 英文 MD → 中文 MD
+# 全流程：PDF → 英文 MD → 中文 MD（默认 DeepSeek）
 python pdf_to_zh_md.py paper.pdf -o output
 
 # 只转换格式
 python pdf_to_md.py paper.pdf -o output
 
-# 只翻译已有英文 MD
+# 只翻译已有英文 MD（DeepSeek，默认 8 并发）
 python translate_md.py paper.md --workers 8
+
+# 用 Ollama 本地翻译
+python translate_md.py paper.md \
+    --base-url http://localhost:11434/v1 \
+    --model qwen2.5:14b \
+    --api-key ollama \
+    --workers 4
+
+# 用 LM Studio 本地翻译
+python translate_md.py paper.md \
+    --base-url http://localhost:1234/v1 \
+    --model "" \
+    --api-key lm-studio \
+    --workers 4
 ```
 
 ### C. 通过 HTTP 驱动 UI（自动化批量）
@@ -123,7 +181,9 @@ python tools/test_batch_via_ui.py path/to/pdfs --workers 8
 
 整个流程里翻译约占 85%，MinerU 解析约占 15%——**并发数主要影响总时长**。
 
-**注意**：DeepSeek 有限流，过高的并发可能触发 429。默认 8 较稳，可按账号配额上调。
+**并发提示**：
+- DeepSeek 官方有限流，并发过高可能 429，默认 8 较稳。
+- Ollama / LM Studio 本地，并发受单卡显存和上下文长度限制；7B 模型 4-8 并发，14B 模型 2-4 并发比较合适。
 
 ---
 
@@ -155,9 +215,10 @@ webui_output/
 ## 依赖致谢
 
 - [MinerU](https://github.com/opendatalab/MinerU) — PDF 解析
-- [DeepSeek](https://platform.deepseek.com) — 翻译
+- [DeepSeek](https://platform.deepseek.com) — 默认翻译后端
+- [Ollama](https://ollama.com) / [LM Studio](https://lmstudio.ai) — 本地翻译后端
 - [Gradio](https://gradio.app) — Web UI
-- [OpenAI Python SDK](https://github.com/openai/openai-python) — DeepSeek 兼容客户端
+- [OpenAI Python SDK](https://github.com/openai/openai-python) — OpenAI 兼容客户端
 
 ---
 

@@ -33,13 +33,19 @@ def main():
     parser.add_argument("pdf_dir", type=Path, help="Directory of PDFs to submit")
     parser.add_argument("--url", default="http://127.0.0.1:7860", help="Gradio URL")
     parser.add_argument("--workers", type=int, default=8, help="Translation concurrency")
-    parser.add_argument("--model", default="deepseek-chat", help="DeepSeek model")
+    parser.add_argument("--model", default="deepseek-chat",
+                        help="Model name (deepseek-chat / qwen2.5:14b / ...)")
+    parser.add_argument("--base-url", default="https://api.deepseek.com",
+                        help="OpenAI-compatible endpoint base URL")
     parser.add_argument("--chunk-size", type=int, default=3000)
     args = parser.parse_args()
 
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    is_local = "localhost" in args.base_url or "127.0.0.1" in args.base_url
+    if not api_key and not is_local:
+        sys.exit("DEEPSEEK_API_KEY not set (required for remote backends)")
     if not api_key:
-        sys.exit("DEEPSEEK_API_KEY not set in this shell")
+        api_key = "local"
 
     pdfs = sorted(args.pdf_dir.glob("*.pdf"))
     if not pdfs:
@@ -61,6 +67,7 @@ def main():
         start_page=-1,
         end_page=-1,
         model=args.model,
+        base_url=args.base_url,
         chunk_size=args.chunk_size,
         workers=args.workers,
         api_key=api_key,

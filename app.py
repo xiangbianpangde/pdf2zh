@@ -221,7 +221,7 @@ def _translate_one(en_md: Path, model: str, chunk_size: int, workers: int,
 
 def run_workflow(pdf_files, md_files, do_convert, do_translate, reuse_server,
                  backend, lang, start_page, end_page,
-                 model, chunk_size, workers, api_key):
+                 model, base_url, chunk_size, workers, api_key):
     log_lines: list[str] = []
     en_outputs: list[str] = []
     zh_outputs: list[str] = []
@@ -250,10 +250,18 @@ def run_workflow(pdf_files, md_files, do_convert, do_translate, reuse_server,
     if do_translate:
         if not api_key:
             api_key = os.getenv("DEEPSEEK_API_KEY", "")
+        # Local backends (Ollama, LM Studio) don't need a real key but the
+        # OpenAI SDK refuses empty strings — substitute a placeholder.
+        is_local = base_url and ("localhost" in base_url or "127.0.0.1" in base_url)
         if not api_key:
-            push("[ERROR] 缺少 DeepSeek API key（设置 DEEPSEEK_API_KEY 环境变量或在 UI 中填入）")
-            yield snapshot()
-            return
+            if is_local:
+                api_key = "local"
+            else:
+                push("[ERROR] 缺少 API key（设置 DEEPSEEK_API_KEY 环境变量，或填入 UI；本地后端可填任意非空）")
+                yield snapshot()
+                return
+        if not base_url:
+            base_url = "https://api.deepseek.com"
 
     inputs = pdf_list if do_convert else md_list
     total = len(inputs)
@@ -328,7 +336,8 @@ def run_workflow(pdf_files, md_files, do_convert, do_translate, reuse_server,
         zh_md: Path | None = None
         try:
             for line, result in _translate_one(en_md, model, int(chunk_size),
-                                                int(workers), api_key):
+                                                int(workers), api_key,
+                                                base_url=base_url):
                 push(line)
                 if result is not None:
                     zh_md = result
@@ -429,20 +438,36 @@ def build_ui():
                         end_page = gr.Number(label="结束页（含此页）",
                                              value=None, precision=0)
 
-                with gr.Accordion("DeepSeek 设置", open=False):
+                with gr.Accordion("翻译模型设置", open=False):
                     _has_env_key = bool(os.getenv("DEEPSEEK_API_KEY"))
+
+                    preset = gr.Dropdown(
+                        choices=[
+                            "DeepSeek 官方",
+                            "Ollama 本地",
+                            "LM Studio 本地",
+                            "自定义",
+                        ],
+                        value="DeepSeek 官方",
+                        label="翻译后端预设",
+                    )
+                    base_url = gr.Textbox(
+                        label="Base URL（OpenAI 兼容接口）",
+                        value="https://api.deepseek.com",
+                        placeholder="https://api.deepseek.com / http://localhost:11434/v1 / ...",
+                    )
+                    model = gr.Textbox(
+                        label="模型名",
+                        value="deepseek-chat",
+                        placeholder="deepseek-chat / qwen2.5:14b / llama3.1:8b ...",
+                    )
                     api_key = gr.Textbox(
-                        label="API Key（留空=用 DEEPSEEK_API_KEY 环境变量）",
+                        label="API Key（本地后端可任意；留空=DEEPSEEK_API_KEY 环境变量）",
                         type="password",
                         value="",
                         placeholder=("已检测到 DEEPSEEK_API_KEY，可留空"
                                      if _has_env_key
-                                     else "sk-... 或设置 DEEPSEEK_API_KEY 环境变量"),
-                    )
-                    model = gr.Dropdown(
-                        choices=["deepseek-chat", "deepseek-reasoner"],
-                        value="deepseek-chat",
-                        label="翻译模型",
+                                     else "sk-... / ollama / lm-studio"),
                     )
                     chunk_size = gr.Slider(
                         minimum=500, maximum=5000, value=3000, step=100,
@@ -450,8 +475,25 @@ def build_ui():
                     )
                     workers = gr.Slider(
                         minimum=1, maximum=32, value=8, step=1,
-                        label="翻译并发数（1=串行，8 默认，大于 DeepSeek 配额会被限流）",
+                        label="翻译并发数（1=串行；远端 API 注意配额，本地按你的硬件）",
                     )
+
+                    PRESETS = {
+                        "DeepSeek 官方": ("https://api.deepseek.com", "deepseek-chat"),
+                        "Ollama 本地": ("http://localhost:11434/v1", "qwen2.5:14b"),
+                        "LM Studio 本地": ("http://localhost:1234/v1", ""),
+                        "自定义": (None, None),
+                    }
+
+                    def _apply_preset(p):
+                        url, mdl = PRESETS.get(p, (None, None))
+                        return (
+                            gr.update(value=url) if url is not None else gr.update(),
+                            gr.update(value=mdl) if mdl is not None else gr.update(),
+                        )
+
+                    preset.change(fn=_apply_preset, inputs=[preset],
+                                  outputs=[base_url, model])
 
                 run_btn = gr.Button("▶ 开始批量处理", variant="primary", size="lg")
 
@@ -497,7 +539,7 @@ def build_ui():
                 pdf_input, md_input,
                 do_convert, do_translate, reuse_server,
                 backend, lang, start_page, end_page,
-                model, chunk_size, workers, api_key,
+                model, base_url, chunk_size, workers, api_key,
             ],
             outputs=[log_box, en_files, zh_files],
         )
