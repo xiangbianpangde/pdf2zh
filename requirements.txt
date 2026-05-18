@@ -1,0 +1,11 @@
+# MinerU 拉取所有 PDF 解析能力 + 内置 gradio + openai SDK
+mineru[all]>=3.1
+
+# 显式列出，方便审计；版本与 mineru[all] 兼容即可
+openai>=1.30
+gradio>=6.0
+gradio-client>=2.0
+
+# Notes:
+# - torch 默认会从 PyPI 装 CPU 版。GPU 用户请按 README 重装 CUDA 版。
+# - 测试驱动 tools/test_batch_via_ui.py 仅依赖 gradio-client。
