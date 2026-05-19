@@ -15,7 +15,21 @@
 
 ---
 
-## 安装
+## 快速开始（Windows，推荐）
+
+零命令行，**双击就能用**：
+
+1. 装 [Python 3.10/3.11/3.12](https://www.python.org/downloads/)，安装时勾选「Add Python to PATH」
+2. 下载本仓库（克隆或下 zip 解压均可）
+3. 双击 `pdf2zh.bat`
+
+首次启动会自动建 `.venv\`、装依赖（5-10 分钟，~7 GB）、可选装 CUDA PyTorch、可选保存 DeepSeek API key 到 `.env`。之后双击秒启。
+
+详细用户手册：[USAGE.md](USAGE.md)。
+
+---
+
+## 手动安装（开发者 / 非 Windows）
 
 Python 3.10–3.12（Windows 受 `ray` 限制不支持 3.13）。
 
