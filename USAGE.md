@@ -71,8 +71,11 @@ LM Studio 同理：先在 LM Studio Developer 页签启动 Local Server，再在
 - `pdf2zh.bat` — 双击这个
 - `app.py` — Gradio 主程序（bat 自动调）
 - `pdf_to_md.py` / `translate_md.py` / `pdf_to_zh_md.py` — 命令行单功能脚本
+  - `pdf_to_zh_md.py paper.pdf -o out/` — 默认 **MinerU 云 API OCR + MiniMax-M3 翻译**（无需本地模型）；加 `--ocr local` 回退本地 mineru
+- `mineru_api.py` — MinerU 云 API OCR 模块（v4 Precision）
 - `tools/test_batch_via_ui.py` — 通过 HTTP 自动化驱动 UI 的脚本（高级）
 - `requirements.txt` / `README.md` / `LICENSE` — 项目元信息
 - `.venv\` — 虚拟环境（首次启动自动建，不要手动删）
 - `.env` — 你的 API key（首次启动询问后保存，**不要提交到 git**）
+- `.secrets\` — 云 API 凭据（mineru.json / minimax.json，**git 已忽略**）
 - `webui_output\` — 输出目录（含日志和 markdown）
