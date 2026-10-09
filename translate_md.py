@@ -1,12 +1,15 @@
-"""Translate English Markdown to Chinese using DeepSeek.
+"""Translate English Markdown to Chinese (OpenAI-compatible endpoint).
+
+默认走本地配置好的 MiniMax-M3（凭据/端点由 config.py 解析：.secrets > 环境变量 > .env）。
 
 Usage:
-    set DEEPSEEK_API_KEY=sk-xxxxxxxx
-    python translate_md.py <input.md> [output.md] [--model deepseek-chat]
-                                                  [--workers 8]
+    python translate_md.py <input.md> [output.md]
+                           [--provider minimax|deepseek|openrouter|ollama|lmstudio]
+                           [--model MiniMax-M3] [--workers 8]
 """
 import argparse
 import os
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -23,29 +26,74 @@ SYSTEM_PROMPT = """你是专业的学术论文翻译助手。将用户给出的�
 3. 图片引用 ![](images/...) 与 HTML <img> 保持原样。
 4. 代码块 ```lang ... ``` 保持原样，注释也不翻译。
 5. 文献引用编号、URL、专有名词（人名、机构、模型名、数据集名）保持英文；首次出现时可在括号内附中文译名。
-6. 表格内容翻译，表格分隔符（| --- |）保持原样。
-7. 输出只包含翻译后的 Markdown 正文，不要添加"以下是翻译"之类的说明、前言或后记。
+6. 表格内容翻译，表格分隔符（| --- |）保持原样；数字、单位、公式符号一律不译。
+7. 图表标题（Figure 1、Table 2 ...）保留编号，只翻译说明文字。
+8. 不得删减、合并或概括任何原文段落，段落顺序保持一致。
+9. 标题：文字翻译成中文，但 `#` 的个数与层级必须与原文严格一致；
+   原文中的普通段落（哪怕看起来像小标题）不要提升为标题，也不要凭空新增标题。
+10. 输出只包含翻译后的 Markdown 正文，不要添加"以下是翻译"之类的说明、前言或后记。
 """
 
 
+_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+_MATH_BLOCK_RE = re.compile(r"\$\$")
+_THINK_RE = re.compile(r"<think>([\s\S]*?)(?:</think>|$)")
+
+
+def clean_reasoning(text: str) -> str:
+    """剥掉推理模型的思维链（MiniMax-M3 / DeepSeek-R1 等）。
+
+    闭合的 <think>...</think> 和被 max_tokens 截断的未闭合 <think>... 都处理。
+    """
+    if not text:
+        return ""
+    return _THINK_RE.sub("", text).strip()
+
+
+def _is_split_safe(block: str) -> bool:
+    """该段落能否独立成块：代码围栏内部、跨段落的 $$ 公式都不行。"""
+    if _FENCE_RE.match(block):
+        return False
+    return len(_MATH_BLOCK_RE.findall(block)) % 2 == 0
+
+
 def chunk_markdown(md: str, max_chars: int = 3000) -> list[str]:
-    """按段落分块，每块不超过 max_chars。优先在 \\n\\n 处切。"""
-    paragraphs = md.split("\n\n")
+    """按空行分块，每块不超过 max_chars；不在代码围栏/块级公式内部切开。"""
+    blocks = md.split("\n\n")
     chunks: list[str] = []
     current: list[str] = []
     current_len = 0
-    for p in paragraphs:
-        p_len = len(p) + 2
-        if current_len + p_len > max_chars and current:
+    fence: str | None = None      # 当前所处代码围栏标记（反引号或波浪线）
+    math_open = False             # $$ 是否未闭合
+
+    for block in blocks:
+        # A cut is safe BEFORE this paragraph only if the preceding paragraph
+        # ended outside a fence/formula. Scan every line so paired delimiters
+        # in one paragraph cannot leave the state permanently open.
+        splittable = fence is None and not math_open
+        for line in block.splitlines():
+            marker = _FENCE_RE.match(line)
+            if marker:
+                token = marker.group(1)
+                if fence is None:
+                    fence = token
+                elif token[0] == fence[0] and len(token) >= len(fence) and not line.strip()[len(token):].strip():
+                    fence = None
+                continue
+            if fence is None and len(_MATH_BLOCK_RE.findall(line)) % 2:
+                math_open = not math_open
+
+        p_len = len(block) + 2
+        if current_len + p_len > max_chars and current and splittable:
             chunks.append("\n\n".join(current))
-            current = [p]
-            current_len = p_len
+            current, current_len = [block], p_len
         else:
-            current.append(p)
+            current.append(block)
             current_len += p_len
     if current:
         chunks.append("\n\n".join(current))
     return chunks
+
 
 
 def translate_chunk(client: OpenAI, chunk: str, model: str = "deepseek-chat",
@@ -62,7 +110,8 @@ def translate_chunk(client: OpenAI, chunk: str, model: str = "deepseek-chat",
                 temperature=0.3,
                 stream=False,
             )
-            return resp.choices[0].message.content or ""
+            content = resp.choices[0].message.content or ""
+            return clean_reasoning(content)
         except Exception as e:
             if attempt < retries - 1:
                 wait = 2 ** attempt
@@ -112,25 +161,34 @@ def translate_chunks_concurrent(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Translate English Markdown to Chinese via DeepSeek")
+    from config import ConfigError, resolve_translate
+
+    parser = argparse.ArgumentParser(
+        description="Translate English Markdown to Chinese (默认 MiniMax-M3)")
     parser.add_argument("input", type=Path, help="Input English Markdown file")
     parser.add_argument("output", type=Path, nargs="?",
                         help="Output Chinese Markdown file (default: <input>_zh.md)")
-    parser.add_argument("--model", default="deepseek-chat",
-                        help="DeepSeek model (deepseek-chat or deepseek-reasoner)")
+    parser.add_argument("--provider", default=None,
+                        help="翻译后端预设（minimax 默认 / deepseek / openrouter / "
+                             "ollama / lmstudio；不传则按 base_url 猜，再默认 minimax）")
+    parser.add_argument("--model", default=None, help="模型名（默认取 .env / 预设）")
+    parser.add_argument("--base-url", default=None, help="API base URL")
+    parser.add_argument("--api-key", default=None,
+                        help="显式 API key（不传则按 .secrets > 环境变量 > .env 解析）")
     parser.add_argument("--chunk-size", type=int, default=3000, help="Max chars per chunk")
     parser.add_argument("--workers", type=int, default=8,
                         help="Concurrent translation requests (default 8, use 1 for serial)")
-    parser.add_argument("--api-key", default=os.getenv("DEEPSEEK_API_KEY"),
-                        help="DeepSeek API key (or set DEEPSEEK_API_KEY)")
-    parser.add_argument("--base-url", default="https://api.deepseek.com",
-                        help="API base URL")
     args = parser.parse_args()
 
-    if not args.api_key:
-        sys.exit("Missing API key. Set DEEPSEEK_API_KEY env var or pass --api-key")
     if not args.input.exists():
         sys.exit(f"Input not found: {args.input}")
+
+    try:
+        cfg = resolve_translate(provider=args.provider, base_url=args.base_url,
+                               model=args.model, api_key=args.api_key)
+    except ConfigError as exc:
+        sys.exit(str(exc))
+    print(cfg.describe())
 
     output = args.output or args.input.with_name(args.input.stem + "_zh.md")
 
@@ -139,7 +197,8 @@ def main():
     print(f"Split into {len(chunks)} chunks (max {args.chunk_size} chars each), "
           f"workers={args.workers}")
 
-    client = OpenAI(api_key=args.api_key, base_url=args.base_url)
+    client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url, timeout=300,
+                    max_retries=0)
 
     t0 = time.time()
 
@@ -147,11 +206,12 @@ def main():
         print(f"  [{done}/{total}] chunk #{idx + 1} ok", flush=True)
 
     translated = translate_chunks_concurrent(
-        client, chunks, model=args.model,
+        client, chunks, model=cfg.model,
         max_workers=args.workers, on_progress=on_progress,
     )
 
-    output.write_text("\n\n".join(translated), encoding="utf-8")
+    output.write_text("\n\n".join(clean_reasoning(t) for t in translated),
+                      encoding="utf-8")
     print(f"\nDone: {output}  ({time.time() - t0:.1f}s)")
 
 

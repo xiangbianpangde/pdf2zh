@@ -61,15 +61,22 @@ def load_token() -> str:
     return ""
 
 
-def _http(url: str, method: str = "GET", data=None, headers=None, timeout: int = 120):
-    """轻量 HTTP：返回 (status, (content_type, body))；HTTPError 也返回而非抛出。"""
+def _http(url: str, method: str = "GET", data=None, headers=None, timeout: int = 120, max_retries: int = 3):
+    """轻量 HTTP：返回 (status, (content_type, body))；HTTPError 也返回而非抛出；自带重试。"""
     req = urllib.request.Request(url, data=data, method=method,
                                  headers=headers or {"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, (resp.headers.get("Content-Type", ""), resp.read())
-    except urllib.error.HTTPError as exc:
-        return exc.code, (exc.headers.get("Content-Type", ""), exc.read())
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status, (resp.headers.get("Content-Type", ""), resp.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, (exc.headers.get("Content-Type", ""), exc.read())
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+            last_err = exc
+            log.warning("HTTP 请求失败 (%s)，第 %d/%d 次重试...", exc, attempt + 1, max_retries)
+            time.sleep(2 * (attempt + 1))
+    raise MinerUError(f"HTTP 请求异常: {last_err}")
 
 
 def _poll_batch(batch_id: str, headers: dict) -> str:
@@ -120,13 +127,22 @@ def precision_extract(pdf: Path, outdir: Path, model: str = "vlm") -> Path:
 
     # 2. PUT 直传 OSS——必须零额外头，否则签名不匹配(403)
     u = urlsplit(file_url)
-    conn = http.client.HTTPSConnection(u.hostname, timeout=300)
-    conn.request("PUT", u.path + "?" + u.query, body=pdf.read_bytes())
-    put_resp = conn.getresponse()
-    put_resp.read()
-    conn.close()
-    if put_resp.status != 200:
-        raise MinerUError(f"上传失败 HTTP {put_resp.status}")
+    pdf_bytes = pdf.read_bytes()
+    for attempt in range(3):
+        try:
+            conn = http.client.HTTPSConnection(u.hostname, timeout=300)
+            conn.request("PUT", u.path + "?" + u.query, body=pdf_bytes)
+            put_resp = conn.getresponse()
+            put_resp.read()
+            conn.close()
+            if put_resp.status == 200:
+                break
+            if attempt == 2:
+                raise MinerUError(f"上传失败 HTTP {put_resp.status}")
+        except Exception as exc:
+            if attempt == 2:
+                raise MinerUError(f"上传异常: {exc}")
+            time.sleep(2)
     log.info("上传完成，等待解析…")
 
     # 3. 轮询 + 4. 下载解包
