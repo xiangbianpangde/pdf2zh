@@ -13,20 +13,20 @@ macOS 上部署 `xiangbianpangde/pdf2zh` 的笔记。Windows 用户看 README �
 
 ```
 pdf2zh/
-├── .venv/                ← 已建（python3.12 -m venv）
-├── .env / .env.example   ← 已建（key 留空，由用户填）
+├── src/pdf2zh/           ← 包本体
+│   ├── cli.py            ← 主入口 → console script `pdf2zh-pipeline`
+│   ├── webui.py          ← Gradio UI（7862）→ `pdf2zh-webui`
+│   └── core/             ← config / mineru / translate / pipeline / contract / html
+├── tests/                ← 契约测试 14 项（`pytest`）
+├── scripts/              ← start_mac.sh、pdf2zh.bat、batch_via_ui.py
+├── legacy/               ← 本机 OCR 遗留脚本（见 legacy/README.md）
+├── docs/                 ← usage.md、macos.md
+├── .env / .env.example   ← 翻译端点与模型（key 建议放 .secrets/）
 ├── .secrets/             ← 云 API 凭据（git 忽略；mineru.json / minimax.json）
-├── output/               ← 默认输出根目录（交付子目录 + 外置 .cache/.checkpoints）
-├── app.py                ← Gradio UI（7862）
-├── start_mac.sh          ← macOS 一键启动
-├── config.py             ← 凭据解析（.env + .secrets → 统一翻译配置）
-├── pipeline.py           ← 管线核心：云 OCR → 产物归位 → 翻译（UI 与 CLI 共用）
-├── mineru_api.py         ← MinerU 云 API OCR 模块（v4 Precision / Agent Flash）
-├── pdf_to_zh_md.py       ← 主入口：PDF → 中文 md + pdf 副本 + images/
-├── translate_md.py       ← 仅 MD → 中文（也可单独当翻译器）
-├── pdf_to_md.py          ← 遗留：MinerU 本地解析（需页码范围时用）
-├── pdf2zh.bat            ← Windows 启动器（macOS 不用）
-└── tools/batch_pdf_to_md.py  ← 遗留：U 盘目录批量转英文 MD
+├── output/               ← 默认输出根（交付子目录 + 外置 .cache/.checkpoints）
+├── pyproject.toml        ← 依赖、extras（ui/local）与 console scripts
+├── requirements.txt      ← 不装包时的最小云端依赖
+└── pytest.ini            ← 收集范围与 pythonpath=src
 ```
 
 ## 启动（macOS）
@@ -38,21 +38,24 @@ cd ~/Projects/pdf2zh
 # 1) 激活 venv（每次新 shell 都跑）
 source .venv/bin/activate
 
-# 2) 自检凭据（MinerU token + MiniMax key）
-python pdf_to_zh_md.py --doctor
+# 2) 装包（首次，或 pyproject.toml 变更后）
+pip install -e ".[ui]"      # 只要 CLI + 云端：pip install -e .
 
-# 3) 起 Web UI（推荐）
-./start_mac.sh
+# 3) 自检凭据（MinerU token + MiniMax key）
+pdf2zh-pipeline --doctor
+
+# 4) 起 Web UI（推荐）
+scripts/start_mac.sh
 # 浏览器自动开 http://127.0.0.1:7862
 
-# 4) 或者命令行单跑（默认走 MinerU 云 API OCR + MiniMax-M3，无需本地模型）
-python pdf_to_zh_md.py paper.pdf -o output/
+# 5) 或者命令行单跑（默认走 MinerU 云 API OCR + MiniMax-M3，无需本地模型）
+pdf2zh-pipeline paper.pdf -o output/
 
-# 5) OCR 回退本地 mineru（需已装模型）
-python pdf_to_zh_md.py paper.pdf -o output/ --ocr local
+# 6) OCR 回退本地 mineru（需已装模型）
+pdf2zh-pipeline paper.pdf -o output/ --ocr local
 
-# 6) 只翻译已有 MD
-python translate_md.py paper.md --workers 8
+# 7) 只翻译已有 MD
+pdf2zh-translate paper.md --workers 8
 ```
 
 ## OCR 选型（2026-09-30 起：默认云 API）
@@ -93,7 +96,7 @@ README 给的"GPU 加速"是 NVIDIA CUDA 指令，**对 M5 无效**：
 3. **断点续跑**：只有 PDF 内容指纹、参数、英文/中文 MD 和资源校验均匹配时才跳过；OCR 缓存在 `output/.cache/<content-and-params-hash>/`，要求 receipt + `READY` 标记。`--force` 跳过旧 OCR 缓存，`--refresh` 保留旧缓存并创建新 run。
 4. **交付下载**：默认目录只含 PDF、英文/中文 MD 和 `images/`；UI 的完整 ZIP 才是可直接转交的自包含包，HTML 通过 `--html` 或 UI 选项启用。
 5. **远端限流**：并发过高会 429，`--workers 8` 较稳；本地 Ollama 14B 建议降到 2-4。
-6. **`pdf2zh.bat` 不能用**：那是 Windows 批处理，macOS 用 `./start_mac.sh`。
+6. **`pdf2zh.bat` 不能用**：那是 Windows 批处理，macOS 用 `scripts/start_mac.sh`。
 
 ## 验证
 
@@ -104,14 +107,14 @@ source .venv/bin/activate
 python -c "import app, pipeline, config, translate_md, pdf_to_md, pdf_to_zh_md, mineru_api; print('OK')"
 
 # 2) CLI --help（不起服务）
-python pdf_to_zh_md.py --help
-python translate_md.py --help
+pdf2zh-pipeline --help
+pdf2zh-translate --help
 
 # 3) 凭据自检（列出所有后端就绪状态）
-python pdf_to_zh_md.py --doctor
+pdf2zh-pipeline --doctor
 
 # 4) 端到端冒烟（约 2-3 分钟/15 页论文）
-python pdf_to_zh_md.py /path/to/en.pdf -o output/
+pdf2zh-pipeline /path/to/en.pdf -o output/
 
 # 5) MinerU CLI（仅 --ocr local 需要）
 mineru --help
@@ -122,7 +125,7 @@ mineru --help
 | 现象 | 排查 |
 |---|---|
 | `ModuleNotFoundError: mineru` | `.venv` 没激活，或 `pip install` 没跑完（看 `/tmp/pdf2zh-pip.log`） |
-| `OSError: [Errno 48] Address already in use` | 7862 端口被占；`lsof -iTCP:7862 -sTCP:LISTEN` 找进程 `kill`，或换 `PDF2ZH_PORT=7863 ./start_mac.sh` |
+| `OSError: [Errno 48] Address already in use` | 7862 端口被占；`lsof -iTCP:7862 -sTCP:LISTEN` 找进程 `kill`，或换 `PDF2ZH_PORT=7863 scripts/start_mac.sh` |
 | `缺少 minimax 的 API key` | `.secrets/minimax.json` 写 `{"key": "sk-..."}`，或设 `MINIMAX_API_KEY`；跑 `--doctor` 看提示 |
 | MinerU 报 401 / 额度不足 | `.secrets/mineru.json` 的 token 过期或额度用尽，去 https://mineru.net/apiManage/token 确认 |
 | 翻译中途报 429 | 调小 `--workers`（如 4），重跑会跳过已完成的 PDF |

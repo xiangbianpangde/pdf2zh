@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 chcp 65001 >nul
 title pdf2zh
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo ==========================================
 echo   pdf2zh - PDF to Chinese Markdown
@@ -67,7 +67,7 @@ echo Subsequent runs will skip this step.
 echo.
 python -m pip install --upgrade pip
 if errorlevel 1 goto :pipfail
-python -m pip install -r requirements.txt
+python -m pip install -e ".[ui,local]"
 if errorlevel 1 goto :pipfail
 echo installed > ".venv\.installed"
 goto :pipdone
@@ -130,7 +130,7 @@ echo Starting Gradio UI at http://127.0.0.1:7860 ...
 echo Close this window to stop the service.
 echo.
 set PYTHONIOENCODING=utf-8
-python app.py
+python -m pdf2zh.webui
 
 if errorlevel 1 (
     echo.

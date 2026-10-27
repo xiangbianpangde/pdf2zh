@@ -11,9 +11,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from translate_md import chunk_markdown
-import pdf_to_zh_md
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from pdf2zh.core.translate import chunk_markdown
+from pdf2zh import cli
 
 
 class TranslationContractTests(unittest.TestCase):
@@ -24,14 +24,14 @@ class TranslationContractTests(unittest.TestCase):
             client = object()
             calls = []
             fail_once = [True]
-            from translate_md import translate_chunks_concurrent
+            from pdf2zh.core.translate import translate_chunks_concurrent
             def fake_translate(_client, chunk, model='x', retries=3):
                 calls.append(chunk)
                 if chunk == 'two' and fail_once[0]:
                     fail_once[0] = False
                     raise RuntimeError('injected interruption')
                 return f'zh:{chunk}'
-            with patch.object(sys.modules['translate_md'], 'translate_chunk', side_effect=fake_translate):
+            with patch.object(sys.modules['pdf2zh.core.translate'], 'translate_chunk', side_effect=fake_translate):
                 with self.assertRaises(RuntimeError):
                     translate_chunks_concurrent(client, chunks, model='m', max_workers=1,
                                                 checkpoint_path=checkpoint, checkpoint_context='ctx')
@@ -41,7 +41,7 @@ class TranslationContractTests(unittest.TestCase):
             self.assertEqual(resumed, ['zh:one', 'zh:two', 'zh:three'])
             self.assertEqual(calls.count('one'), 1)
             calls.clear()
-            with patch.object(sys.modules['translate_md'], 'translate_chunk', side_effect=fake_translate):
+            with patch.object(sys.modules['pdf2zh.core.translate'], 'translate_chunk', side_effect=fake_translate):
                 changed = translate_chunks_concurrent(client, chunks, model='m', max_workers=1,
                                                        checkpoint_path=checkpoint, checkpoint_context='changed')
             self.assertEqual(changed, resumed)
@@ -68,8 +68,8 @@ class TranslationContractTests(unittest.TestCase):
             pdf = Path(tmp) / 'paper.pdf'
             pdf.write_bytes(b'%PDF-1.4')
             result = SimpleNamespace(skipped=False, translated=False, out_dir=Path(tmp), n_images=0)
-            with patch.object(pdf_to_zh_md.pipeline, 'process', return_value=result), contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(pdf_to_zh_md.main([str(pdf), '-o', tmp, '--skip-translate']), 0)
+            with patch.object(cli.pipeline, 'process', return_value=result), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main([str(pdf), '-o', tmp, '--skip-translate']), 0)
 
     def test_batch_cli_processes_papers_concurrently(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -89,8 +89,8 @@ class TranslationContractTests(unittest.TestCase):
                     active -= 1
                 return SimpleNamespace(skipped=False, translated=True,
                                        out_dir=Path(out_root) / pdf.stem, n_images=0)
-            with patch.object(pdf_to_zh_md.pipeline, 'process', side_effect=fake_process), contextlib.redirect_stdout(io.StringIO()):
-                code = pdf_to_zh_md.main([*(str(pdf) for pdf in pdfs), '-o', tmp,
+            with patch.object(cli.pipeline, 'process', side_effect=fake_process), contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main([*(str(pdf) for pdf in pdfs), '-o', tmp,
                                           '--parallelism', '2'])
             self.assertEqual(code, 0)
             self.assertEqual(maximum, 2)
@@ -99,9 +99,9 @@ class TranslationContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pdf = Path(tmp) / 'error.pdf'
             pdf.write_bytes(b'%PDF-1.4')
-            with patch.object(pdf_to_zh_md.pipeline, 'process', side_effect=RuntimeError('injected')):
+            with patch.object(cli.pipeline, 'process', side_effect=RuntimeError('injected')):
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    self.assertEqual(pdf_to_zh_md.main([str(pdf), '-o', tmp]), 1)
+                    self.assertEqual(cli.main([str(pdf), '-o', tmp]), 1)
 
     def test_batch_cli_rejects_output_stem_collisions(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -109,7 +109,7 @@ class TranslationContractTests(unittest.TestCase):
             for pdf in pdfs:
                 pdf.write_bytes(b'%PDF-1.4')
             with contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(pdf_to_zh_md.main([*(str(pdf) for pdf in pdfs), '-o', tmp]), 2)
+                self.assertEqual(cli.main([*(str(pdf) for pdf in pdfs), '-o', tmp]), 2)
 
 
 if __name__ == '__main__':

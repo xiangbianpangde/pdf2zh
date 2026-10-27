@@ -19,23 +19,20 @@
 
 ## 快速开始
 
-两种安装，按是否需要本地 OCR / Web UI 选一种：
-
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 
-# A. 只要云端 OCR + 翻译（约 10 MB 依赖）
-pip install -r requirements-api.txt
+# 装包（推荐）：云端路径只要 openai / markdown-it-py / Pillow
+pip install -e .
+# 需要 Web UI：pip install -e ".[ui]"
+# 需要 --ocr local：pip install -e ".[local]"   # 含 mineru[all]，会拉 torch（~1.8 GB）
 
-# B. 需要 --ocr local 或 Web UI（含 mineru[all]，会拉 torch，约 1.8 GB）
-# pip install -r requirements.txt
-
-python pdf_to_zh_md.py --doctor
-python pdf_to_zh_md.py paper.pdf -o ./output
+pdf2zh-pipeline --doctor
+pdf2zh-pipeline paper.pdf -o ./output
 ```
 
-`requirements-api.txt` 覆盖 CLI 云端路径（`--ocr precision|flash`、`--html`、资源校验、交付 ZIP）；`requirements.txt` 额外提供本地 `mineru` CLI 与 Gradio UI。两者都只装了各自需要的东西，不要叠加安装。
+三个 console script：`pdf2zh-pipeline`（PDF → 中文 MD）、`pdf2zh-translate`（已有 MD → 中文）、`pdf2zh-webui`（本地 Gradio UI，端口 7862）。不装包也可以：`pip install -r requirements.txt` 后跑 `python -m pdf2zh.cli`（`pytest.ini` 已把 `src/` 放进 `pythonpath`）。
 
 凭据：
 
@@ -60,7 +57,7 @@ output/
 ### 审计布局
 
 ```bash
-python pdf_to_zh_md.py paper.pdf -o output --layout audit
+pdf2zh-pipeline paper.pdf -o output --layout audit
 ```
 
 审计布局额外生成：
@@ -74,7 +71,7 @@ _mineru/layout.json   # 若 OCR 返回
 ### HTML 与完整 ZIP
 
 ```bash
-python pdf_to_zh_md.py paper.pdf -o output --html
+pdf2zh-pipeline paper.pdf -o output --html
 ```
 
 HTML 是可搜索、可流式阅读的预览，不承诺复刻 PDF 的绝对定位和双栏版式。UI 生成的完整 ZIP 会包含 PDF、英文/中文 Markdown、HTML（如启用）、`images/` 和审计文件（如启用），不会包含缓存、checkpoint、`.secrets` 或临时文件；CLI 输出目录本身同样不包含这些运行态文件。
@@ -83,19 +80,19 @@ HTML 是可搜索、可流式阅读的预览，不承诺复刻 PDF 的绝对定�
 
 ```bash
 # 免 Token 的小文件云解析
-python pdf_to_zh_md.py paper.pdf --ocr flash
+pdf2zh-pipeline paper.pdf --ocr flash
 
 # 只 OCR，不翻译
-python pdf_to_zh_md.py paper.pdf --skip-translate
+pdf2zh-pipeline paper.pdf --skip-translate
 
 # 强制重新 OCR 与翻译
-python pdf_to_zh_md.py paper.pdf --force --refresh
+pdf2zh-pipeline paper.pdf --force --refresh
 
 # 只翻译已有英文 Markdown
-python translate_md.py paper.md --provider minimax --workers 8
+pdf2zh-translate paper.md --provider minimax --workers 8
 
 # Web UI
-./start_mac.sh
+scripts/start_mac.sh
 ```
 
 ## OCR 选型结论（2026-10-18）
@@ -157,12 +154,12 @@ WeVisDoc 作者 README 自报的 v1.6 分数为 WeVisDoc-4B 95.38、2B 95.06；�
 ## 验证
 
 ```bash
-.venv/bin/python -m pytest                       # 14 项契约测试（CI 同款）
-.venv/bin/python -m pytest tests/test_resource_contract.py -v   # 单个文件
-.venv/bin/python -m py_compile pipeline.py resource_contract.py html_output.py mineru_api.py pdf_to_zh_md.py app.py
+python -m pytest                       # 14 项契约测试（CI 同款）
+python -m pytest tests/test_resource_contract.py -v   # 单个文件
+python -m compileall -q src legacy scripts        # 语法检查
 ```
 
-GitHub Actions 在每次 push 到 `main` 和 PR 时跑同一套检查（`.github/workflows/ci.yml`），只装 `requirements-api.txt` + `pytest`。
+GitHub Actions 在每次 push 到 `main` 和 PR 时跑同一套检查（`.github/workflows/ci.yml`），只装 `requirements.txt` + `pytest`。
 
 ## 许可证
 

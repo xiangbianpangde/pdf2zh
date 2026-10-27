@@ -1,7 +1,7 @@
 """批量把 USB 说明文档目录里的 PDF 转成 Markdown（遗留：本机 mineru CLI）。
 
 新项目默认走云 OCR 一站式管线（英文 PDF → 中文 md + pdf 副本 + images/）：
-    python pdf_to_zh_md.py <pdf>... -o <out>
+    pdf2zh-pipeline <pdf>... -o <out>
 本脚本保留给「只要英文 MD、不翻译、跑本机模型」的批量场景。
 
 设计：

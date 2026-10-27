@@ -10,11 +10,11 @@ from pathlib import Path
 
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import pipeline
-from html_output import render_markdown_file
-from resource_contract import create_delivery_zip, extract_image_refs, validate_delivery
+from pdf2zh.core import pipeline
+from pdf2zh.core.html import render_markdown_file
+from pdf2zh.core.contract import create_delivery_zip, extract_image_refs, validate_delivery
 
 
 class ResourceContractTests(unittest.TestCase):

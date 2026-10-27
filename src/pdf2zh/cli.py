@@ -1,20 +1,23 @@
-"""英文 PDF → 中文 Markdown 交付目录（MinerU 云 OCR + 本地 MiniMax-M3）。
+"""英文 PDF → 中文 Markdown 交付 CLI（MinerU 云 OCR + OpenAI 兼容翻译）。
 
-每个 PDF 产出一个子目录：
+默认（minimal 布局）每个 PDF 产出一个子目录，四项交付物：
 
     <out>/<pdf 名>/
-        <pdf 名>_zh.md      中文 Markdown
+        <pdf 名>_zh.md      中文 Markdown（翻译成功后）
         <pdf 名>.pdf        原始 PDF 副本
-        images/             OCR 抽取的图片 / 图表
-        <pdf 名>_en.md      英文原文（默认保留，便于回溯/重译）
-        _mineru/            MinerU 附产物（layout.json 等）
+        <pdf 名>_en.md      英文原文（--no-keep-english 可关）
+        images/             OCR 抽取并归一化的图片
+
+    --layout audit 追加：manifest.json、validation.json、_mineru/（MinerU 附产物）
 
 用法：
-    python pdf_to_zh_md.py paper.pdf                     # 单份，默认 ./output
-    python pdf_to_zh_md.py *.pdf -o ~/Desktop/out         # 批量
-    python pdf_to_zh_md.py paper.pdf --ocr flash          # 免 Token 的 flash 模式
-    python pdf_to_zh_md.py paper.pdf --skip-translate     # 只做 OCR
-    python pdf_to_zh_md.py --doctor                       # 只检查凭据
+    pdf2zh-pipeline paper.pdf                      # 单份，默认 ./output
+    pdf2zh-pipeline *.pdf -o ~/Desktop/out         # 批量（--parallelism 并发）
+    pdf2zh-pipeline paper.pdf --ocr flash          # 免 Token 的 flash 模式
+    pdf2zh-pipeline paper.pdf --skip-translate     # 只做 OCR
+    pdf2zh-pipeline --doctor                       # 只检查凭据
+
+未安装包时等价于 `python -m pdf2zh.cli`。
 """
 from __future__ import annotations
 
@@ -25,10 +28,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from pathlib import Path
 
-import config
-import pipeline
-from config import ConfigError
-from pipeline import PipelineError, safe_stem
+from pdf2zh.core import config, pipeline
+from pdf2zh.core.config import ConfigError
+from pdf2zh.core.pipeline import PipelineError, safe_stem
 
 log = logging.getLogger("pdf2zh")
 DEFAULT_OUT = Path("./output")

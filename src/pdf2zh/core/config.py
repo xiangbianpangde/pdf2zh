@@ -21,7 +21,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
+from pdf2zh import PROJECT_ROOT
+
+PROJECT_DIR = PROJECT_ROOT
 ENV_FILE = PROJECT_DIR / ".env"
 SECRETS_DIR = PROJECT_DIR / ".secrets"
 # 共享凭据池（与每日早报项目共用同一份 key/mineru token）

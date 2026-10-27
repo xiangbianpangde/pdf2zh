@@ -12,9 +12,12 @@ env/
 
 # Output artifacts
 .checkpoints/
-webui_output/
 output/
 *.log
+
+# Build artifacts
+build/
+dist/
 
 # Local env / secrets
 .env

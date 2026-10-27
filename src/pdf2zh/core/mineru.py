@@ -9,10 +9,10 @@
 凭据查找顺序（token）：
     1. 环境变量 MINERU_TOKEN
     2. <本项目>/.secrets/mineru.json  的 "token" 字段
-    3. /Users/xbpd/WorkBuddy/每日早报/.secrets/mineru.json（共享凭据池）
+    3. 共享凭据池（本机固定路径，见 SECRETS_CANDIDATES 末项）
 
 用法（作为库）：
-    from mineru_api import precision_extract, flash_extract, MinerUError
+    from pdf2zh.core.mineru import precision_extract, flash_extract, MinerUError
     md_path = precision_extract(Path("paper.pdf"), Path("out/paper"))
 """
 import http.client
@@ -26,12 +26,13 @@ import zipfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from pdf2zh import PROJECT_ROOT
+
 log = logging.getLogger(__name__)
 
 BASE = "https://mineru.net"
-PROJECT_DIR = Path(__file__).resolve().parent
 SECRETS_CANDIDATES = [
-    PROJECT_DIR / ".secrets" / "mineru.json",
+    PROJECT_ROOT / ".secrets" / "mineru.json",
     Path("/Users/xbpd/WorkBuddy/每日早报/.secrets/mineru.json"),
 ]
 POLL_INTERVAL_SEC = 5

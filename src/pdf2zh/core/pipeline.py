@@ -19,14 +19,14 @@ from typing import Callable
 
 from openai import OpenAI
 
-import mineru_api
-from config import TranslateConfig, resolve_translate
-from html_output import render_markdown_file
-from resource_contract import (
+from . import mineru
+from .config import TranslateConfig, resolve_translate
+from .html import render_markdown_file
+from .contract import (
     canonical_ref, image_link_spans, is_image_file, normalize_image,
     rewrite_image_links, validate_delivery,
 )
-from translate_md import chunk_markdown, clean_reasoning, translate_chunks_concurrent
+from .translate import chunk_markdown, clean_reasoning, translate_chunks_concurrent
 
 log = logging.getLogger("pdf2zh.pipeline")
 Emit = Callable[[str], None]
@@ -126,9 +126,9 @@ def ocr(pdf: Path, workdir: Path, mode: str = "precision", model: str = "vlm",
     if mode == "local":
         return _ocr_local(pdf, workdir, backend, lang, timeout, say, start_page, end_page)
     if mode == "flash":
-        md = mineru_api.flash_extract(pdf, workdir / "extracted")
+        md = mineru.flash_extract(pdf, workdir / "extracted")
     elif mode in {"precision", "api"}:
-        md = mineru_api.precision_extract(pdf, workdir / "extracted", model=model)
+        md = mineru.precision_extract(pdf, workdir / "extracted", model=model)
     else:
         raise PipelineError(f"未知 OCR 方式：{mode}")
     say(f"  ✓ MinerU {mode} → {md.name}")

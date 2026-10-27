@@ -6,8 +6,9 @@
 
 ```bash
 source .venv/bin/activate
-python pdf_to_zh_md.py --doctor
-python pdf_to_zh_md.py 论文.pdf -o ./output
+pip install -e .            # 首次；需要 UI 用 -e ".[ui]"，需要本机 OCR 用 -e ".[local]"
+pdf2zh-pipeline --doctor
+pdf2zh-pipeline 论文.pdf -o ./output
 ```
 
 ## 默认输出
@@ -26,7 +27,7 @@ output/
 ### 审计布局
 
 ```bash
-python pdf_to_zh_md.py 论文.pdf -o output --layout audit
+pdf2zh-pipeline 论文.pdf -o output --layout audit
 ```
 
 `audit` 额外输出 `manifest.json`、`validation.json` 和可用的 `_mineru/` sidecar。缓存和 checkpoint 始终留在交付目录外。
@@ -34,7 +35,7 @@ python pdf_to_zh_md.py 论文.pdf -o output --layout audit
 ### HTML 阅读预览
 
 ```bash
-python pdf_to_zh_md.py 论文.pdf -o output --html
+pdf2zh-pipeline 论文.pdf -o output --html
 ```
 
 HTML 是流式阅读预览，不是 PDF 原生版式复刻。表格、图片引用和 LaTeX 会保留；默认不注入外部脚本，公式以可复制的 LaTeX 文本展示。
@@ -79,7 +80,8 @@ HTML 是流式阅读预览，不是 PDF 原生版式复刻。表格、图片引�
 ## Web UI
 
 ```bash
-./start_mac.sh
+pip install -e ".[ui]"
+pdf2zh-webui            # 或 scripts/start_mac.sh
 ```
 
 UI 与 CLI 共用同一管线。可选 `minimal/audit`、HTML 预览；完成后提供英文 MD、中文 MD、HTML（如启用）和完整 ZIP。
@@ -113,8 +115,8 @@ UI 与 CLI 共用同一管线。可选 `minimal/audit`、HTML 预览；完成后
 ## 验证命令
 
 ```bash
-.venv/bin/python -m pytest          # 14 项契约测试，与 CI 一致
-.venv/bin/python -m py_compile pipeline.py resource_contract.py html_output.py mineru_api.py pdf_to_zh_md.py app.py
+python -m pytest          # 14 项契约测试，与 CI 一致
+python -m compileall -q src legacy scripts
 ```
 
-`pytest.ini` 把收集范围限定在契约套件；`tools/test_batch_via_ui.py` 是需要在线 Gradio 的手动驱动，不会被收集。
+`pytest.ini` 把收集范围限定在 `tests/`（并把 `src/` 加进 `pythonpath`）；`scripts/batch_via_ui.py` 是需要在线 Gradio 的手动驱动，不会被收集。

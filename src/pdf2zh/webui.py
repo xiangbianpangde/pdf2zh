@@ -1,22 +1,20 @@
 """Gradio Web UI —— 英文 PDF → 中文 Markdown 交付目录。
 
-与命令行 `pdf_to_zh_md.py` 共用 pipeline.py：
+与 `pdf2zh-pipeline` 共用同一个 pipeline：
     OCR     MinerU 云 API（v4 Precision，默认；也可切 flash / 本机 mineru）
-    翻译    本地配置好的 MiniMax-M3（凭据与端点由 config.py 解析）
+    翻译    本地配置好的 MiniMax-M3（凭据与端点由 core.config 解析）
 
-输出格式（每个 PDF 一个子目录）：
-    <输出根目录>/<pdf 名>/
-        <pdf 名>_zh.md      中文 Markdown
-        <pdf 名>.pdf        原始 PDF 副本
-        images/             OCR 抽取的图片 / 图表
-        <pdf 名>_en.md      英文原文
-        _mineru/            MinerU 附产物
+默认输出（每个 PDF 一个子目录）：`_zh.md`、`.pdf`、`_en.md` 和 `images/`；
+`--layout audit` 等价的 UI 选项追加 `manifest.json`、`validation.json`、`_mineru/`。
 
 启动：
-    ./start_mac.sh          # macOS
-    python app.py            # 等价
+    pdf2zh-webui            # 安装后
+    python -m pdf2zh.webui  # 未安装时
+    scripts/start_mac.sh    # macOS 一键
 浏览器自动打开 http://127.0.0.1:7862 （端口用 PDF2ZH_PORT 覆盖）
 """
+from __future__ import annotations
+
 import os
 import queue
 import subprocess
@@ -25,18 +23,14 @@ import threading
 from pathlib import Path
 from typing import Iterator
 
-from resource_contract import create_delivery_zip
-
 import gradio as gr
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pdf2zh import PROJECT_ROOT
+from pdf2zh.core import config, pipeline
+from pdf2zh.core.contract import create_delivery_zip
 
-import config  # noqa: E402
-import pipeline  # noqa: E402
-
-PROJECT_DIR = Path(__file__).resolve().parent
 OUTPUT_ROOT = Path(
-    os.getenv("PDF2ZH_OUTPUT_ROOT", str(PROJECT_DIR / "output"))
+    os.getenv("PDF2ZH_OUTPUT_ROOT", str(PROJECT_ROOT / "output"))
 ).expanduser()
 
 OCR_MODES = {
@@ -353,7 +347,8 @@ def build_ui() -> gr.Blocks:
     return ui
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console-script entry point (`pdf2zh-webui`)."""
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     port = int(os.getenv("PDF2ZH_PORT", os.getenv("GRADIO_SERVER_PORT", "7862")))
     build_ui().queue().launch(
@@ -363,3 +358,7 @@ if __name__ == "__main__":
         theme=gr.themes.Soft(),
         allowed_paths=[str(OUTPUT_ROOT)],
     )
+
+
+if __name__ == "__main__":
+    main()

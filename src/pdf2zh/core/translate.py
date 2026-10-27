@@ -196,7 +196,7 @@ def translate_chunks_concurrent(
 
 
 def main():
-    from config import ConfigError, resolve_translate
+    from .config import ConfigError, resolve_translate
 
     parser = argparse.ArgumentParser(
         description="Translate English Markdown to Chinese (默认 MiniMax-M3)")
