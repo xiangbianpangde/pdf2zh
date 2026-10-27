@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The suite only exercises the delivery contract (chunking, checkpoints,
+      # image normalization, manifest/zip contents). MinerU, torch and gradio are
+      # needed for a real OCR/translation run, not for these checks.
+      - name: Install test-only dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest openai markdown-it-py Pillow
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      # Catches syntax/import-order regressions in modules the suite does not touch.
+      - name: Byte-compile entry points
+        run: |
+          python -m py_compile \
+            pdf_to_zh_md.py pdf_to_md.py pipeline.py config.py \
+            translate_md.py mineru_api.py resource_contract.py \
+            html_output.py app.py

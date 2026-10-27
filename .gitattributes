@@ -1,0 +1,12 @@
+# Normalize text files to LF in the repository; Windows-facing scripts stay CRLF
+# in the working tree so cmd.exe parses labels and goto correctly.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Deliverables and fixtures must never be line-ending converted.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.zip binary
