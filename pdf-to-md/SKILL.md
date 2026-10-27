@@ -3,7 +3,7 @@ name: pdf-to-md
 description: Converts a local PDF into a self-contained Markdown delivery directory through the MinerU cloud API, preserving heading structure, tables, formulas and extracted figures, with optional Chinese translation through any OpenAI-compatible model. Use when asked to 把 PDF 转成 Markdown、论文转 md、要保留图片和公式的 PDF 解析、把英文论文翻译成中文并保留插图、用 MinerU 解析这份 PDF, or whenever a PDF must become portable Markdown plus an images/ folder. Do not use for docx/pptx/xlsx conversion, PDF layout reproduction, or merely reading, summarizing or answering questions about a paper.
 compatibility: Pi coding agent; Python 3.10+; network access to mineru.net and one OpenAI-compatible endpoint
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
   status: "active"
   layer: "task"
   priority: "45"
@@ -22,7 +22,7 @@ metadata:
 | flash 通道（免 Token，纯 Markdown） | ✅ 真实 PDF 实测通过 |
 | 图片归一化 + 链接改写 + 硬校验 | ✅ 实测 67 张图、0 issue |
 | 可选翻译（任意 OpenAI 兼容端点） | ✅ 真实模型实测，中英图片序列一致 |
-| 批量、并发、OCR 缓存 | ✅ 已实现（3 份以上批量未压测） |
+| 批量、并发、OCR 缓存 | ✅ 压测通过：3 份并发 47 s，复用 0 次外部调用 |
 | 离线测试 | ✅ `python3 -m unittest discover -s tests -t tests` 45 项 |
 
 ## 什么时候用
@@ -67,9 +67,9 @@ python3 scripts/pdf2md.py /abs/paper.pdf --ocr flash
 | 通道 | Token | 大小/页数 | 图片 | 结构 JSON |
 |---|---|---|---|---|
 | `precision` | 需要 | ≤200 MB / ≤200 页 | ✅ | ✅ |
-| `flash` | 不需要 | ≤10 MB / ≤20 页 | ❌ | ❌ |
+| `flash` | 不需要 | ≤10 MB / ≤20 页（超页用 `--pages 1-20`） | ❌ | ❌ |
 
-**「保留图片」只有 `precision` 能满足。** 实测 flash 会输出结构完整但**零图片引用**的 Markdown，所以它不是降级替身，是另一种交付。
+**「保留图片」只有 `precision` 能满足。** 实测 flash 会输出结构完整但**零图片引用**的 Markdown，所以它不是降级替身，是另一种交付。flash 超过 20 页会报错并提示用 `--pages`（实测 44 页文件传 `--pages 1-20` 可成功）。
 
 ## 交付契约（摘要）
 

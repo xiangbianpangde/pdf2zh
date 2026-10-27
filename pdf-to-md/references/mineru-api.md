@@ -255,8 +255,31 @@ HTML 源文件的输出略有不同：`full.md` 为正文 Markdown，`main.html`
 
 ## 6. 待实测/存疑（不要当事实用）
 
-1. ⚠️ **轻量接口页数上限自相矛盾**：限制表写 ≤ 20 页，而 `failed` 示例的 `err_msg` 写 "exceeds lightweight API limit (50 pages)"。真实阈值需实测。
+1. ⚠️ **轻量接口页数上限：实测为 20 页**。限制表写 ≤ 20 页，而 `failed` 示例的 `err_msg` 写 "exceeds lightweight API limit (50 pages)"，属于旧文案。44 页文件实测返回：`file page count exceeds API limit (20 pages), please input page_range to specify the page range`。绕过方式：传 `page_range`（本项目 `--pages`）。
 2. 本页有「限流策略」导航项，但正文未展开并发上限、每分钟请求数具体值。
 3. 结果文件在服务端的保留时长、`full_zip_url` 的有效期未写明。
 4. 账号 1000 页/天是「最高优先级额度」，超出后的实际影响（队列时长）未量化。
 5. 云 API v4 的 zip 图片命名与 4.0 文档模型（`page_{idx}_...`）是否一致未确认——实现上应避免依赖。
+
+## 7. 实测记录（2026-10-27）
+
+环境：macOS，Python 3.12，同一台机器与网络。
+
+| 场景 | 输入 | 实测 |
+|---|---|---|
+| precision 单文件 | 16 页 / 5.2 MB | 21 s（提交→解包），67 张图 |
+| precision 2 并发 | 15 页 + 5 页 | 26.5 s，图片 14 + 3 张，均校验通过 |
+| flash 单文件 | 16 页 / 5.2 MB | 22 s，结构完整（31 标题 / 7 表格 / 6 公式），0 张图 |
+| flash 3 并发 | 16 + 15 + 5 页 | 47.3 s，3/3 成功，未触发 IP 限频 |
+| flash 超页 | 44 页 | `failed`，上限 20 页（见 §6.1） |
+| 配额 | 本轮累计约 60 页 | 远低于 1000 页/天，未触发降级 |
+
+结论：异步提交 + 轮询适合本机场景；队列耗时波动大（同一文件 6–20 s 不等），因此超时与解析失败必须分开报。
+
+## 8. 与旧实现的行为差异（迁移时注意）
+
+| 事项 | 旧实现 | 现状 |
+|---|---|---|
+| flash 上传 | multipart 直接 POST 到 `/parse/file` | JSON 取签名 URL + 裸 `PUT` + 轮询 |
+| 单/批量任务 | 总是走 `/file-urls/batch` | 相同；本项目固定 1 文件/请求，不依赖 50 个上限 |
+| 错误信息 | 只打印 `code`/`msg` | `code` + `msg` + HTTP 状态 + 修复提示 |

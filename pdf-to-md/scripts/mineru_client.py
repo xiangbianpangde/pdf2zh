@@ -128,9 +128,13 @@ def _poll(deadline_seconds: float, interval: float, fetch: Callable[[], dict],
         if state == "done":
             return data
         if state == "failed":
-            raise MineruError(
-                f"MinerU 解析失败：{data.get('err_msg') or '未给出原因'}"
-                f"（state={state}）", code=data.get("err_code"))
+            reason = str(data.get("err_msg") or "未给出原因")
+            lowered = reason.lower()
+            hint = ""
+            if "page count exceeds" in lowered or "page_range" in lowered:
+                hint = "；用 --pages 1-20 只解析前 20 页，或改用 --ocr precision"
+            raise MineruError(f"MinerU 解析失败：{reason}（state={state}）{hint}",
+                              code=data.get("err_code"))
     raise MineruError(f"等待 MinerU 结果超时（>{int(deadline_seconds)}s）：这是等待超时，不是解析失败")
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 - 2026-10-28
+
+- M3 压测（`docs/M3-STRESS.md`）：flash 3 份并发 47.3 s；precision 2 份并发 26.5 s；失败隔离成立（4 份中 1 份超页失败，其余正常，失败者无交付目录）。
+- 实测两层复用均为 0 次外部调用：完成标记 0.13 s 跳过；删掉标记后 OCR 缓存仍命中、不调 MinerU。
+- 实测 flash 真实页数上限为 20 页（官方示例的 50 页是旧文案）；失败信息新增「用 `--pages 1-20` 或改 `--ocr precision`」提示，44 页文件传 `--pages 1-20` 实测成功。
+- 翻译并发：workers 1→8 提速 2.6×（7 块 102.2 s → 38.8 s）；该端点 16 并发 × 3000 字无 429。
+- 新增 `tests/test_netclient.py`：用本地 stub 确定性验证 429 重试、400 不重试、User-Agent 固定、空响应与 `<think>` 剥离、端点 URL 拼接。
+
 ## 0.2.0 - 2026-10-27
 
 - 实现可执行管线：`scripts/pdf2md.py` 编排、`mineru_client.py` 双通道、`organize.py` 归位、`validate.py` 硬校验、`translate.py` 可选翻译、`config.py` 凭据解析、`netclient.py` 网络层、`images.py` 图片归一化、`mdlinks.py` 引用扫描、`errors.py` 失败分类。

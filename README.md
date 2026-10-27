@@ -2,7 +2,7 @@
 
 把 PDF 转成可移植 Markdown 的 **Pi Skill**：MinerU 云 API 解析（保留标题结构、表格、公式、图片）+ 任意 OpenAI 兼容模型翻译（可选，参数随时可换）。
 
-> 状态：**M1/M2 已实现并跑通真实链路**。M3（批量压测）与 M4（skill 收口）见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+> 状态：**M1–M3 已实现并通过真实验证**（含批量压测，见 [docs/M3-STRESS.md](docs/M3-STRESS.md)）。M4（skill 收口）见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 两条硬约束（先看这个）
 
@@ -44,6 +44,10 @@ out/paper/
 | flash OCR | 22 s，结构完整（31 标题 / 7 表格 / 6 公式），**0 图** |
 | 翻译（`deepseek-v4.1-flash`，26 块 / 6 并发） | 122 s，标题 31/31、HTML 表格 7/7、块级公式 6/6、图片序列 57/57 一致 |
 | 错误 Token | 退出码 1，`HTTP 401「user token expired」`，不留交付目录 |
+| 批量 3 份并发（flash） | 47.3 s，3/3 成功 |
+| 复用（完成标记 / OCR 缓存） | 均 0.13 s、**0 次外部调用** |
+| 失败隔离（4 份混入超页文件） | 3 成功 1 失败，退出码 1，失败者无交付目录 |
+| 翻译并发 1 → 8 | 102.2 s → 38.8 s（**2.6×**），端点 16 并发无 429 |
 
 ## 目录
 
@@ -52,7 +56,8 @@ out/paper/
 ├── README.md
 ├── docs/
 │   ├── PLAN.md               # 目标、范围、契约、决策、验收
-│   └── ROADMAP.md            # M0–M5 与门禁
+│   ├── ROADMAP.md            # M0–M5 与门禁
+│   └── M3-STRESS.md          # 批量/并发/缓存/限流压测报告
 └── pdf-to-md/                # Pi Skill 包（安装单元）
     ├── SKILL.md              # 触发条件、判断流程、失败报告
     ├── CHANGELOG.md
@@ -61,7 +66,7 @@ out/paper/
     │   ├── output-contract.md# 九类校验码、命名、缓存与重跑
     │   └── translation.md    # 模型参数、端点拼接、网关兼容、检查点
     ├── scripts/              # 零第三方依赖，Python 3.10+ 标准库
-    └── tests/                # 45 项离线用例
+    └── tests/                # 54 项离线用例
 ```
 
 ## 验证
