@@ -7,10 +7,10 @@
 | 阶段 | 状态 |
 |---|---|
 | M0 立项与底线 | ✅ 完成（2026-10-27） |
-| M1 单通道跑通 | ⬜ 未开始 |
-| M2 可选翻译 | ⬜ 未开始 |
-| M3 批量与缓存 | ⬜ 未开始 |
-| M4 Skill 收口 | ⬜ 未开始 |
+| M1 单通道跑通 | ✅ 完成（真实 PDF 实测） |
+| M2 可选翻译 | ✅ 完成（真实模型实测） |
+| M3 批量与缓存 | 🟡 代码已实现，缺压测 |
+| M4 Skill 收口 | ⬜ 下一步 |
 | M5 扩展 | ⬜ 未开始 |
 
 ## 里程碑总览
@@ -40,56 +40,57 @@
 
 门禁核对：资料有来源与抓取时间 ✅；计划有可验收项 ✅；无空目录空文件 ✅。
 
-## M1 单通道跑通（下一步）
+## M1 单通道跑通 ✅
 
 范围：**只做 precision + 不翻译**。把交付契约钉死。
 
-任务：
+已落地：
 
-1. `references/output-contract.md`：目录、命名、`images/` 引用规则、六类硬校验、`_meta/` 内容
-2. `scripts/mineru_client.py`：`POST /api/v4/file-urls/batch` → PUT（不带 `Content-Type`）→ 轮询 `GET /api/v4/extract-results/batch/{id}` → 下载 zip → 解包（防 zip-slip）
-3. `scripts/organize.py`：解析 md 图片引用 → 真实编码嗅探 → 复制进 `images/` → 重写链接 → 写 `manifest.json`
-4. `scripts/validate.py`：缺图 / 外链 / 绝对路径与 `..` / 扩展名与 MIME 不符 / 不可解码 / 中英序列不一致
-5. `scripts/pdf2md.py` + `scripts/doctor.py`：参数、退出码（0/1/2）、凭据自检
-6. `tests/`：图片归一化、链接重写、校验六类、zip-slip、参数校验
-7. `pdf-to-md/SKILL.md`：加执行段（脚本调用与输出判读），仍不安装
+- [x] `references/output-contract.md`：目录、命名、`images/` 引用规则、九类硬校验、`_meta/` 内容
+- [x] `scripts/mineru_client.py`：`POST /api/v4/file-urls/batch` → 裸 `PUT` → 轮询批量结果 → 下载 zip（防 zip-slip）→ 解包
+- [x] `scripts/organize.py`：按 md 引用定位图片 → 真实编码嗅探 → 复制进 `images/` → 重写链接 → 写 `manifest.json`
+- [x] `scripts/validate.py`：缺图 / 外链 / 绝对路径与 `..` / 扩展名与 MIME 不符 / 不可解码 / 中英序列不一致 / 空 md / 非 UTF-8
+- [x] `scripts/pdf2md.py` + `--doctor`：参数、退出码（0/1/2）、凭据自检（真实探测 MinerU 与模型端点）
+- [x] `tests/`：45 项（图片归一化与冲突、引用扫描与改写、九类校验、分块边界、检查点续跑、CLI 退出码、失败路径）
 
-门禁：
+门禁核验：
 
-- 真实 PDF（样例：`~/Downloads/1-s2.0-S0141938225001878-main.pdf`，5.2 MB / 16 页）跑通，`validation.json.ok == true`
-- 图片数与 md 引用数一致，抽看 3 张能打开
-- 删掉 `MINERU_TOKEN` 与 `.secrets` 后重跑：明确报错、不留半成品目录
-- `pytest` 全绿
+- 真实 PDF（16 页 / 5.2 MB）precision → 21 s，67 张图，`validation.json.ok == true` ✅
+- 图片引用 57 条全部可解析，Pillow 实际解码 ✅
+- 错误 Token → `HTTP 401「user token expired」`，退出码 1，不留交付目录 ✅
 
-风险：MinerU 排队时间不可控 → 轮询超时与解析失败分开报。
+## M2 可选翻译 ✅
 
-## M2 可选翻译
+已落地：
 
-任务：
+- [x] `references/translation.md`：三个模型参数、端点拼接、网关兼容、分块、检查点、失败语义
+- [x] `scripts/translate.py`：按空行分块（不在围栏/块级公式/表格内切）、并发、检查点、指纹失效
+- [x] 结构保护：公式、代码块、图片引用、表格分隔符、URL 不译；`<think>` 块剥离
+- [x] 模型可切换：`--base-url` / `--model` / `--api-key` / `--api-header`，优先级 命令行 > 环境变量 > `.secrets` > `~/.config/pdf2md` > `.env`
+- [x] 测试：闭合定界符不关闭分块、跨行围栏不切开、检查点只恢复缺失块、上下文变化则失效
 
-1. `references/translation.md`：模型选择、分块规则、保护规则、检查点语义、失败语义
-2. `scripts/translate.py`：按空行分块（不在代码围栏/块级公式/表格内切）、并发、检查点、指纹失效
-3. 结构保护：公式、代码块、图片引用、表格分隔符、URL 不译
-4. 测试：闭合定界符不关闭分块、跨行围栏不切开、检查点只恢复缺失块、上下文变化则失效
-5. `pdf2md.py --translate [--target zh]`
+门禁核验：
 
-门禁：
+- 同一份 PDF：不翻译得英文交付；翻译后中英图片序列 57/57 一致 ✅
+- 标题 31/31、HTML 表格 7/7、块级公式 6/6 未变 ✅
+- 翻译失败时 `_zh.md` 与 `completion.json` 都不写，英文与检查点保留（有回归用例） ✅
 
-- 同一份 PDF：不翻译产出 A；翻译产出 B；B 的图片引用数量与顺序等于 A
-- 翻译中途 kill，重跑只补缺失块（日志可见「已恢复 n/m」）
-- 翻译失败时 `_zh.md` 不存在，英文与检查点保留
+> 未做：中途 kill 后真实续跑的端到端验证（单元测试已覆盖检查点语义）。
 
-## M3 批量与缓存
+## M3 批量与缓存 🟡
 
-任务：
+已落地（代码）：
 
-1. 多 PDF 输入、`--parallelism`、每文件独立目录
-2. 缓存：`<out>/.cache/<源 sha256 + 通道参数>/`，含 receipt + READY 标记；`--refresh` 走新 run 目录，不销毁旧缓存
-3. 限流：MinerU 单批 ≤50、账号 1000 页/天；翻译并发上限
-4. 可选：批量时镜像输入目录树（需用户确认后再做）
-5. 测试：缓存命中不调 API、`--refresh` 不复用、同名不同内容不误命中
+- [x] 多 PDF 输入、`--parallelism`、每文件独立目录、`--json` 汇总
+- [x] 缓存：`<out>/.cache/<sha256(源+参数)>/`，含 `receipt.json` + `READY`；失败时清理空目录
+- [x] `--force` 忽略完成标记与缓存；同名不同内容拒绝覆盖（sha256 比对）
+- [x] 测试：缓存命中不调 API、完成指纹不匹配则重做、失败不留半成品
 
-门禁：3 份 PDF 并发成功；第二次运行全命中缓存且输出一致；配额内无 429/限流错误。
+未完成：
+
+- [ ] 3 份以上 PDF 并发压测（含 MinerU 单批 ≤50、账号 1000 页/天配额）
+- [ ] 翻译并发上限与 429 退避的真实压测
+- [ ] 可选：批量时镜像输入目录树（需用户确认）
 
 ## M4 Skill 收口
 
@@ -113,12 +114,12 @@
 | OCR/翻译 benchmark | 选型有据 | M3 |
 | `pi-paper-translator` 兼容层 | 修好坏掉的 `pdf_translate` | 用户决定是否要 |
 
-## 首次实跑的准备清单
+## 首次实跑的准备清单（已完成，留档）
 
-1. 本 worktree 的 `.env` / `.secrets` 已按指令删除 → 从 `main` 复制，或直接导出 `MINERU_TOKEN` / `MINIMAX_API_KEY`
-2. 确认样例 PDF 存在：`~/Downloads/1-s2.0-S0141938225001878-main.pdf`
-3. 输出根目录用临时目录，避免污染 home
-4. 跑完核对：`_meta/validation.json`、`ls images | wc -l`、md 内 `![](images/` 计数
+1. ~~本 worktree 的 `.env` / `.secrets` 已按指令删除~~ → 已重建 `.secrets/pdf2md.json`（`.gitignore` 覆盖）
+2. 样例 PDF：`~/Downloads/1-s2.0-S0141938225001878-main.pdf`
+3. 输出根目录用 `/tmp/pdf2md-e2e`、`/tmp/pdf2md-flash`，不污染 home
+4. 核对项：`_meta/validation.json`、`ls images | wc -l`、md 内 `images/` 引用计数
 
 ## 变更管理
 

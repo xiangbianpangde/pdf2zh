@@ -1,0 +1,18 @@
+# Runtime state must never enter the repository.
+.secrets/
+.env
+.env.*
+
+# Pipeline output and caches
+output/
+.cache/
+.checkpoints/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# OS / editors
+.DS_Store
+*.swp
