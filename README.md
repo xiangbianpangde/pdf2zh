@@ -158,7 +158,7 @@ WeVisDoc 作者 README 自报的 v1.6 分数为 WeVisDoc-4B 95.38、2B 95.06；�
 
 ```bash
 .venv/bin/python -m pytest                       # 14 项契约测试（CI 同款）
-.venv/bin/python -m pytest tools/test_resource_contract.py -v   # 单个文件
+.venv/bin/python -m pytest tests/test_resource_contract.py -v   # 单个文件
 .venv/bin/python -m py_compile pipeline.py resource_contract.py html_output.py mineru_api.py pdf_to_zh_md.py app.py
 ```
 
