@@ -5,6 +5,8 @@ mineru[all]>=3.1
 openai>=1.30
 gradio>=6.0
 gradio-client>=2.0
+markdown-it-py>=3.0
+Pillow>=10.0
 
 # Notes:
 # - torch 默认会从 PyPI 装 CPU 版。GPU 用户请按 README 重装 CUDA 版。

@@ -1,57 +1,68 @@
-"""Gradio web UI for the PDF -> English MD -> Chinese MD workflow.
+"""Gradio Web UI —— 英文 PDF → 中文 Markdown 交付目录。
 
-Run:
-    C:\\Users\\yhn\\mineru\\.venv\\Scripts\\Activate.ps1
-    python C:\\Users\\yhn\\mineru\\scripts\\app.py
-Browser opens at http://127.0.0.1:7860 automatically.
+与命令行 `pdf_to_zh_md.py` 共用 pipeline.py：
+    OCR     MinerU 云 API（v4 Precision，默认；也可切 flash / 本机 mineru）
+    翻译    本地配置好的 MiniMax-M3（凭据与端点由 config.py 解析）
 
-Batch mode: upload multiple PDFs (or MDs); they are processed sequentially.
-By default a persistent `mineru-api` server is started once per session and
-reused across all PDFs — model load (~1 minute) happens once, then each PDF
-just streams over HTTP.
+输出格式（每个 PDF 一个子目录）：
+    <输出根目录>/<pdf 名>/
+        <pdf 名>_zh.md      中文 Markdown
+        <pdf 名>.pdf        原始 PDF 副本
+        images/             OCR 抽取的图片 / 图表
+        <pdf 名>_en.md      英文原文
+        _mineru/            MinerU 附产物
+
+启动：
+    ./start_mac.sh          # macOS
+    python app.py            # 等价
+浏览器自动打开 http://127.0.0.1:7862 （端口用 PDF2ZH_PORT 覆盖）
 """
-import atexit
 import os
-import re
+import queue
 import subprocess
 import sys
-import time
-import urllib.error
-import urllib.request
+import threading
 from pathlib import Path
 from typing import Iterator
 
+from resource_contract import create_delivery_zip
+
 import gradio as gr
-from openai import OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from translate_md import chunk_markdown, translate_chunks_concurrent
+
+import config  # noqa: E402
+import pipeline  # noqa: E402
+
+PROJECT_DIR = Path(__file__).resolve().parent
+OUTPUT_ROOT = Path(
+    os.getenv("PDF2ZH_OUTPUT_ROOT", str(PROJECT_DIR / "output"))
+).expanduser()
+
+OCR_MODES = {
+    "云 API Precision（推荐，需 Token）": "precision",
+    "云 API Flash（免 Token，≤10MB/≤20页）": "flash",
+    "本机 mineru CLI（需本地模型）": "local",
+}
+PROVIDERS = {
+    "MiniMax 官方（本地已配置）": "minimax",
+    "DeepSeek 官方": "deepseek",
+    "OpenRouter": "openrouter",
+    "Ollama 本地": "ollama",
+    "LM Studio 本地": "lmstudio",
+    "自定义（下方手填）": None,
+}
 
 
-OUTPUT_ROOT = Path(os.getenv("PDF2ZH_OUTPUT_ROOT",
-                              str(Path(__file__).resolve().parent / "webui_output")))
-PROGRESS_NOISE = re.compile(r"\d+%\||it/s\]|s/it\]|Fetching \d+ files:")
-
-API_HOST = "127.0.0.1"
-API_PORT = 30000
-API_URL = f"http://{API_HOST}:{API_PORT}"
-API_LOG = OUTPUT_ROOT / "mineru-api.log"
-API_STARTUP_TIMEOUT = 240  # seconds
-
-# Module-level state for the persistent mineru-api server
-_api_proc: subprocess.Popen | None = None
+def _default_translate() -> config.TranslateConfig | None:
+    """启动时探一次本地配置，UI 默认值跟着走（探不到就退回 minimax 预设）。"""
+    try:
+        return config.resolve_translate()
+    except config.ConfigError:
+        return None
 
 
-def _is_noise(line: str) -> bool:
-    return bool(PROGRESS_NOISE.search(line))
-
-
-def _find_md(out_dir: Path, stem: str) -> Path | None:
-    matches = list(out_dir.rglob(f"{stem}.md"))
-    return matches[0] if matches else None
-
-
-def _normalize_files(files) -> list[str]:
+def _normalize(files) -> list[str]:
     if not files:
         return []
     if isinstance(files, (list, tuple)):
@@ -59,547 +70,296 @@ def _normalize_files(files) -> list[str]:
     return [files]
 
 
-def _ping_api(timeout: float = 2.0) -> bool:
-    try:
-        with urllib.request.urlopen(f"{API_URL}/docs", timeout=timeout) as r:
-            return r.status == 200
-    except (urllib.error.URLError, ConnectionError, OSError):
-        return False
+def _stream(step: str, prefix: list[str], *args, **kwargs
+            ) -> Iterator[tuple[str, "pipeline.ProcessResult | None"]]:
+    """后台线程跑 pipeline，边跑边把日志推给 Gradio（保持界面不卡死）。
 
-
-def ensure_api_server() -> Iterator[str]:
-    """Start mineru-api if not already running. Yields log lines, returns when ready."""
-    global _api_proc
-
-    if _ping_api():
-        yield f"      mineru-api 已运行 @ {API_URL}"
-        return
-
-    if _api_proc is not None and _api_proc.poll() is None:
-        yield f"      mineru-api 进程存活但无响应，强制重启 ..."
-        _api_proc.terminate()
-        try:
-            _api_proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            _api_proc.kill()
-        _api_proc = None
-
-    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    yield f"      启动 mineru-api (host={API_HOST}, port={API_PORT}) 日志→ {API_LOG.name}"
-
-    log_fh = open(API_LOG, "ab", buffering=0)
-    _api_proc = subprocess.Popen(
-        ["mineru-api", "--host", API_HOST, "--port", str(API_PORT)],
-        stdout=log_fh,
-        stderr=subprocess.STDOUT,
-    )
-
-    deadline = time.time() + API_STARTUP_TIMEOUT
-    last_msg_t = 0.0
-    while time.time() < deadline:
-        if _api_proc.poll() is not None:
-            yield f"      [ERROR] mineru-api 退出 (code={_api_proc.returncode})。查看 {API_LOG}"
-            return
-        if _ping_api(timeout=1.5):
-            elapsed = int(API_STARTUP_TIMEOUT - (deadline - time.time()))
-            yield f"      ✓ mineru-api 就绪 @ {API_URL} (耗时 ~{elapsed}s)"
-            return
-        if time.time() - last_msg_t > 8:
-            yield f"      ... 等待 mineru-api 就绪 (首次启动需加载模型)"
-            last_msg_t = time.time()
-        time.sleep(2)
-    yield f"      [ERROR] mineru-api 启动超时 (>{API_STARTUP_TIMEOUT}s)"
-
-
-def _cleanup_api():
-    global _api_proc
-    if _api_proc is not None and _api_proc.poll() is None:
-        _api_proc.terminate()
-        try:
-            _api_proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            _api_proc.kill()
-
-
-atexit.register(_cleanup_api)
-
-
-def _convert_pdf(pdf: Path, out_root: Path, backend: str, lang: str,
-                 start_page, end_page, api_url: str | None
-                 ) -> Iterator[tuple[str, Path | None]]:
-    out_root.mkdir(parents=True, exist_ok=True)
-    cmd = ["mineru", "-p", str(pdf), "-o", str(out_root.resolve()),
-           "-b", backend, "-l", lang]
-    if start_page is not None and int(start_page) >= 0:
-        cmd += ["-s", str(int(start_page))]
-    if end_page is not None and int(end_page) >= 0:
-        cmd += ["-e", str(int(end_page))]
-    if api_url:
-        cmd += ["--api-url", api_url]
-
-    yield f"      命令: {' '.join(cmd)}", None
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        bufsize=1,
-    )
-    assert proc.stdout is not None
-    for raw in proc.stdout:
-        line = raw.rstrip()
-        if not line or _is_noise(line):
-            continue
-        yield f"      {line}", None
-    proc.wait()
-    if proc.returncode != 0:
-        yield f"[ERROR] MinerU 退出码 {proc.returncode}", None
-        return
-
-    en_md = _find_md(out_root / pdf.stem, pdf.stem)
-    if not en_md:
-        yield f"[ERROR] 未找到生成的 markdown ({out_root / pdf.stem})", None
-        return
-    yield f"      ✓ 英文 MD: {en_md}", en_md
-
-
-def _translate_one(en_md: Path, model: str, chunk_size: int, workers: int,
-                   api_key: str, base_url: str = "https://api.deepseek.com"
-                   ) -> Iterator[tuple[str, Path | None]]:
-    import queue
-    import threading
-
-    md_text = en_md.read_text(encoding="utf-8")
-    chunks = chunk_markdown(md_text, chunk_size)
-    yield f"      {len(chunks)} 个分块, 模型={model}, 并发={workers}", None
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    # Bridge from worker thread (translate_chunks_concurrent runs sync) to this
-    # generator's yields by spawning a thread for the parallel work and feeding
-    # progress via a queue.
+    yield (累计日志, 结果)；结果只在最后一次 yield 非 None。
+    """
     q: "queue.Queue[tuple]" = queue.Queue()
-    result_box: list = [None, None]  # [results_list, exception]
 
-    def on_progress(done, total, idx):
-        q.put(("progress", done, total, idx))
+    def emit(line: str) -> None:
+        q.put(("log", line))
 
-    def worker():
+    def on_progress(done: int, total: int, idx: int) -> None:
+        q.put(("progress", (done, total, idx)))
+
+    def worker() -> None:
         try:
-            result_box[0] = translate_chunks_concurrent(
-                client, chunks, model=model,
-                max_workers=workers, on_progress=on_progress,
-            )
-        except Exception as e:
-            result_box[1] = e
-        finally:
-            q.put(("done",))
+            runner = (pipeline.process_markdown if step == "md"
+                      else pipeline.process)
+            q.put(("result", runner(*args, on_progress=on_progress, emit=emit, **kwargs)))
+        except Exception as exc:                      # 交给 UI 展示，不炸线程
+            q.put(("error", exc))
 
-    t = threading.Thread(target=worker, daemon=True)
-    t.start()
-
+    lines: list[str] = list(prefix)
+    threading.Thread(target=worker, daemon=True).start()
     while True:
-        msg = q.get()
-        if msg[0] == "progress":
-            _, done, total, idx = msg
-            yield f"      [{done}/{total}] chunk #{idx + 1} ok", None
-        elif msg[0] == "done":
-            break
+        kind, val = q.get()
+        if kind == "log":
+            lines.append(str(val))
+            yield "\n".join(lines[-500:]), None
+        elif kind == "progress":
+            done, total, idx = val
+            lines.append(f"      [{done}/{total}] 段落 #{idx + 1} 完成")
+            yield "\n".join(lines[-500:]), None
+        elif kind == "result":
+            yield "\n".join(lines[-500:]), val
+            return
+        elif kind == "error":
+            lines.append(f"[ERROR] {val}")
+            yield "\n".join(lines[-500:]), None
+            return
 
-    t.join()
-    if result_box[1] is not None:
-        raise result_box[1]
 
-    translated = result_box[0]
-    zh_md = en_md.with_name(en_md.stem + "_zh.md")
-    zh_md.write_text("\n\n".join(translated), encoding="utf-8")
-    yield f"      ✓ 中文 MD: {zh_md}", zh_md
-
-
-def run_workflow(pdf_files, md_files, do_convert, do_translate, reuse_server,
-                 backend, lang, start_page, end_page,
-                 model, base_url, chunk_size, workers, api_key):
+def run_workflow(pdf_files, md_files, do_convert, do_translate, ocr_mode_label,
+                 ocr_model, backend, lang, start_page, end_page,
+                 provider_label, base_url, model, chunk_size, workers,
+                 api_key, force, layout="minimal", render_html=False):
+    """批量入口：逐个 PDF 跑「云 OCR → 归位 → 翻译」，日志实时刷新。"""
     log_lines: list[str] = []
     en_outputs: list[str] = []
     zh_outputs: list[str] = []
+    html_outputs: list[str] = []
+    zip_outputs: list[str] = []
 
-    def push(msg: str):
+    def push(msg: str) -> None:
         log_lines.append(msg)
 
     def snapshot():
-        return (
-            "\n".join(log_lines[-500:]),
-            en_outputs.copy() if en_outputs else None,
-            zh_outputs.copy() if zh_outputs else None,
-        )
+        return ("\n".join(log_lines[-500:]),
+                en_outputs.copy() if en_outputs else None,
+                zh_outputs.copy() if zh_outputs else None,
+                html_outputs.copy() if html_outputs else None,
+                zip_outputs.copy() if zip_outputs else None)
 
-    raw_pdfs = _normalize_files(pdf_files)
-    raw_mds = _normalize_files(md_files)
+    raw_pdfs, raw_mds = _normalize(pdf_files), _normalize(md_files)
+    ocr_mode = OCR_MODES.get(ocr_mode_label, "precision")
+    provider = PROVIDERS.get(provider_label, config.DEFAULT_PROVIDER)
 
-    # Smart inference: if user uploaded MDs but no PDFs, switch off the convert step.
+    # 只传非空值，让 config.py 走「.secrets > 环境变量 > .env > 预设」的默认链
+    kwargs_common = dict(
+        provider=provider,
+        base_url=(base_url or None),
+        model=(model or None),
+        api_key=(api_key or None),
+        chunk_size=int(chunk_size),
+        workers=int(workers),
+        force=bool(force),
+        layout=layout,
+        render_html=bool(render_html),
+    )
+
     if do_convert and not raw_pdfs and raw_mds:
-        push(f"提示：未检测到 PDF，但上传了 {len(raw_mds)} 个 Markdown — "
-             "自动跳过 PDF → Markdown 步骤，直接翻译。")
+        push("提示：未上传 PDF，但上传了 Markdown —— 自动跳过 OCR，直接翻译。")
         do_convert = False
 
-    pdf_list = raw_pdfs if do_convert else []
-    md_list = raw_mds if not do_convert else []
-
-    if do_convert and not pdf_list:
-        push("[ERROR] 请在 PDF 区上传至少一个 .pdf 文件。\n"
-             "       （如果你只想翻译已有的 Markdown，请取消勾选 'PDF → Markdown' "
-             "并把 .md 文件放到 Markdown 区）")
+    inputs = raw_pdfs if do_convert else raw_mds
+    if not inputs:
+        push("[ERROR] " + ("请在 PDF 区上传至少一个 .pdf 文件。"
+                           if do_convert else
+                           "请在 Markdown 区上传至少一个 .md 文件（且不勾选 OCR）。"))
         yield snapshot()
         return
-    if not do_convert and not md_list:
-        push("[ERROR] 未勾选 PDF → Markdown，则需要在 Markdown 区上传至少一个 .md 文件")
-        yield snapshot()
-        return
-    if do_translate:
-        if not api_key:
-            api_key = os.getenv("DEEPSEEK_API_KEY", "")
-        # Local backends (Ollama, LM Studio) don't need a real key but the
-        # OpenAI SDK refuses empty strings — substitute a placeholder.
-        is_local = base_url and ("localhost" in base_url or "127.0.0.1" in base_url)
-        if not api_key:
-            if is_local:
-                api_key = "local"
-            else:
-                push("[ERROR] 缺少 API key（设置 DEEPSEEK_API_KEY 环境变量，或填入 UI；本地后端可填任意非空）")
-                yield snapshot()
-                return
-        if not base_url:
-            base_url = "https://api.deepseek.com"
 
-    inputs = pdf_list if do_convert else md_list
-    total = len(inputs)
-    push(f"批量处理 {total} 个文件 (convert={do_convert}, translate={do_translate}, "
-         f"reuse_server={reuse_server})")
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    push(f"输出根目录：{OUTPUT_ROOT}")
+    push(f"批量 {len(inputs)} 个文件｜OCR={ocr_mode}｜"
+         f"翻译={'开' if do_translate else '关'}")
     yield snapshot()
 
-    api_url = None
-    if do_convert and reuse_server:
-        push("--- 检查 / 启动 mineru-api 常驻服务 ---")
-        yield snapshot()
-        for line in ensure_api_server():
-            push(line)
-            yield snapshot()
-        if _ping_api():
-            api_url = API_URL
-        else:
-            push("      ⚠ 服务未就绪，回退到单 PDF 临时实例（每个 PDF 重新加载模型）")
-            yield snapshot()
-
     for idx, path_str in enumerate(inputs, 1):
-        in_path = Path(path_str)
+        src = Path(path_str)
         push("")
-        push(f"=== [{idx}/{total}] {in_path.name} ===")
+        push(f"=== [{idx}/{len(inputs)}] {src.name} ===")
         yield snapshot()
 
         if do_convert:
-            existing_en = OUTPUT_ROOT / in_path.stem / "auto" / f"{in_path.stem}.md"
-            existing_zh = existing_en.with_name(existing_en.stem + "_zh.md")
-            if do_translate and existing_zh.exists():
-                push(f"      跳过：中文 MD 已存在 {existing_zh.name}")
-                en_outputs.append(str(existing_en))
-                zh_outputs.append(str(existing_zh))
-                yield snapshot()
-                continue
-            if not do_translate and existing_en.exists():
-                push(f"      跳过：英文 MD 已存在 {existing_en.name}")
-                en_outputs.append(str(existing_en))
-                yield snapshot()
-                continue
-
-            push(f"[1/2] MinerU 转换 ({backend}, lang={lang}, "
-                 f"{'reuse server' if api_url else 'temp instance'})")
-            yield snapshot()
-
-            en_md: Path | None = None
-            for line, result in _convert_pdf(in_path, OUTPUT_ROOT,
-                                             backend, lang, start_page, end_page,
-                                             api_url):
-                push(line)
-                if result is not None:
-                    en_md = result
-                yield snapshot()
-
-            if en_md is None:
-                push("      跳过 (转换失败)")
-                yield snapshot()
-                continue
-            en_outputs.append(str(en_md))
-            yield snapshot()
+            kwargs = dict(kwargs_common, ocr_mode=ocr_mode, ocr_model=ocr_model,
+                          backend=backend, skip_translate=not do_translate,
+                          lang=lang, start_page=start_page, end_page=end_page)
+            step = "pdf"
         else:
-            en_md = in_path
-            push(f"[1/2] 跳过 PDF 转换，使用 {en_md.name}")
-            en_outputs.append(str(en_md))
+            kwargs = dict(kwargs_common, skip_translate=not do_translate)
+            step = "md"
+
+        res = None
+        for log_text, result in _stream(step, log_lines, src, OUTPUT_ROOT, **kwargs):
+            if log_text:
+                log_lines[:] = log_text.split("\n")
+            if result is not None:
+                res = result
             yield snapshot()
 
-        if not do_translate:
+        if res is None:
+            push(f"      ✗ {src.name} 处理失败，跳过")
+            yield snapshot()
             continue
 
-        push("[2/2] DeepSeek 翻译")
+        push(f"      — 目录 {res.out_dir.name}/｜图片 {res.n_images} 张｜"
+             f"{'中文 MD 已生成' if res.translated else '仅 OCR，未翻译'}")
+        if res.en_md.is_file():
+            en_outputs.append(str(res.en_md))
+        if res.translated and res.zh_md.is_file():
+            zh_outputs.append(str(res.zh_md))
+        html_outputs.extend(str(path) for path in getattr(res, "html_paths", []) if path.is_file())
+        if res.translated:
+            try:
+                zip_path = OUTPUT_ROOT / f"{res.out_dir.name}.zip"
+                zip_outputs.append(str(create_delivery_zip(res.out_dir, zip_path,
+                                       include_chinese=True)))
+            except Exception as exc:
+                push(f"      ⚠ ZIP 打包失败：{exc}")
+        elif do_translate:
+            push("      ✗ 翻译未完成，不生成完整交付 ZIP；英文与检查点保留")
+        else:
+            push("      — 仅 OCR，未生成完整交付 ZIP")
         yield snapshot()
-        zh_md: Path | None = None
-        try:
-            for line, result in _translate_one(en_md, model, int(chunk_size),
-                                                int(workers), api_key,
-                                                base_url=base_url):
-                push(line)
-                if result is not None:
-                    zh_md = result
-                yield snapshot()
-        except Exception as e:
-            push(f"[ERROR] 翻译失败: {e}")
-            yield snapshot()
-            continue
-
-        if zh_md is not None:
-            zh_outputs.append(str(zh_md))
-            yield snapshot()
 
     push("")
-    push(f"全部完成: {len(en_outputs)} 个英文 MD, {len(zh_outputs)} 个中文 MD")
-    if _ping_api():
-        push(f"mineru-api 仍在 {API_URL} 待命，下次批处理可直接使用")
+    push(f"全部完成：{len(en_outputs)} 份英文 MD，{len(zh_outputs)} 份中文 MD，{len(html_outputs)} 份 HTML")
+    push(f"产物目录：{OUTPUT_ROOT}")
     yield snapshot()
 
 
-def ui_status_api():
-    """For the status refresh button."""
-    if _ping_api():
-        return f"🟢 运行中 — {API_URL}（日志：{API_LOG}）"
-    if _api_proc is not None and _api_proc.poll() is None:
-        return f"🟡 启动中（PID {_api_proc.pid}），稍候 ..."
-    return "🔴 未启动（首次批处理时会自动启动）"
-
-
-def ui_start_api():
-    lines = []
-    for line in ensure_api_server():
-        lines.append(line.strip())
-    return "\n".join(lines) + "\n\n" + ui_status_api()
-
-
-def ui_stop_api():
-    global _api_proc
-    if _api_proc is None or _api_proc.poll() is not None:
-        return "(没有正在运行的 mineru-api 进程)\n\n" + ui_status_api()
-    _api_proc.terminate()
-    try:
-        _api_proc.wait(timeout=10)
-        msg = f"已停止 (PID 退出码 {_api_proc.returncode})"
-    except subprocess.TimeoutExpired:
-        _api_proc.kill()
-        msg = "已强制停止"
-    _api_proc = None
-    return msg + "\n\n" + ui_status_api()
-
-
 def ui_open_output_dir():
-    """Open OUTPUT_ROOT in the OS file manager."""
+    """在系统文件管理器里打开输出根目录。"""
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     try:
         if sys.platform == "win32":
-            os.startfile(str(OUTPUT_ROOT))  # type: ignore[attr-defined]
+            os.startfile(str(OUTPUT_ROOT))                      # type: ignore[attr-defined]
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(OUTPUT_ROOT)])
         else:
             subprocess.Popen(["xdg-open", str(OUTPUT_ROOT)])
         return f"已打开：{OUTPUT_ROOT}"
-    except Exception as e:
-        return f"打开失败：{e}\n手动复制路径：{OUTPUT_ROOT}"
+    except Exception as exc:
+        return f"打开失败：{exc}\n手动复制路径：{OUTPUT_ROOT}"
 
 
-def build_ui():
-    with gr.Blocks(title="PDF → 中文 Markdown") as app:
+def _apply_provider(p: str):
+    """切换后端预设 → 自动填 Base URL 与模型名。"""
+    preset = config.PRESETS.get(p or config.DEFAULT_PROVIDER, {})
+    return gr.update(value=preset.get("base_url")), gr.update(value=preset.get("model"))
+
+
+def build_ui() -> gr.Blocks:
+    default_cfg = _default_translate()
+    d_url = default_cfg.base_url if default_cfg else config.PRESETS["minimax"]["base_url"]
+    d_model = default_cfg.model if default_cfg else config.PRESETS["minimax"]["model"]
+    ocr_ready = bool(config.load_mineru_token())
+    zh_hint = ("已检测到本地 MiniMax 配置，可直接留空"
+               if default_cfg else "未检测到 key，可在此粘贴")
+
+    with gr.Blocks(title="PDF → 中文 Markdown") as ui:
         gr.Markdown(
-            "# 📄 PDF → 中文 Markdown（支持批量 + 常驻模型服务）\n"
-            "MinerU 解析 + DeepSeek 翻译。批量模式下复用 mineru-api 常驻进程，"
-            "模型只加载一次。"
+            "# 📄 英文 PDF → 中文 Markdown\n"
+            "**MinerU 云 OCR + 本地 MiniMax-M3 翻译**（批量）。"
+            "每个 PDF 产出一个子目录：`中文 md ＋ 原始 pdf ＋ images/`。"
         )
 
         with gr.Row():
-            with gr.Column(scale=1, min_width=380):
+            with gr.Column(scale=1, min_width=390):
                 gr.Markdown("### 1) 输入")
-                pdf_input = gr.File(
-                    label="PDF 文件（可多选）",
-                    file_types=[".pdf"],
-                    type="filepath",
-                    file_count="multiple",
-                )
-                md_input = gr.File(
-                    label="（可选）英文 Markdown — 仅翻译时用（可多选）",
-                    file_types=[".md"],
-                    type="filepath",
-                    file_count="multiple",
-                )
+                pdf_input = gr.File(label="英文 PDF（可多选）",
+                                    file_types=[".pdf"], type="filepath",
+                                    file_count="multiple")
+                md_input = gr.File(label="（可选）已有英文 Markdown — 仅翻译时用",
+                                   file_types=[".md"], type="filepath",
+                                   file_count="multiple")
 
                 gr.Markdown("### 2) 步骤")
-                do_convert = gr.Checkbox(label="PDF → Markdown（MinerU）", value=True)
-                do_translate = gr.Checkbox(label="Markdown → 中文（DeepSeek）", value=True)
-                reuse_server = gr.Checkbox(
-                    label="复用 mineru-api 常驻服务（批量强烈推荐）",
-                    value=True,
-                )
+                do_convert = gr.Checkbox(label="PDF → Markdown（MinerU 云 OCR）", value=True)
+                do_translate = gr.Checkbox(label="Markdown → 中文", value=True)
 
-                with gr.Accordion("MinerU 设置", open=False):
-                    backend = gr.Dropdown(
-                        choices=["pipeline", "vlm-auto-engine", "hybrid-auto-engine"],
-                        value="pipeline",
-                        label="后端（pipeline = 最省显存，8GB 卡推荐）",
+                with gr.Accordion("OCR 设置", open=False):
+                    ocr_mode_label = gr.Dropdown(
+                        choices=list(OCR_MODES), value=list(OCR_MODES)[0],
+                        label="OCR 方式",
                     )
-                    lang = gr.Dropdown(
-                        choices=["en", "ch", "ch_server", "ch_lite", "japan", "korean"],
-                        value="en",
-                        label="OCR 语言提示",
+                    gr.Markdown(
+                        f"🔑 MinerU Token：{'已配置' if ocr_ready else '未配置（precision 不可用）'}"
+                        "　来源 `.secrets/mineru.json` 或环境变量 `MINERU_TOKEN`"
                     )
-                    with gr.Row():
-                        start_page = gr.Number(label="起始页（0 起，留空=全部）",
-                                               value=None, precision=0)
-                        end_page = gr.Number(label="结束页（含此页）",
-                                             value=None, precision=0)
+                    ocr_model = gr.Radio(choices=["vlm", "pipeline"], value="vlm",
+                                         label="云端解析模型（vlm 质量优先）")
+                    with gr.Accordion("本机 mineru 专用", open=False):
+                        backend = gr.Dropdown(
+                            choices=["pipeline", "vlm-auto-engine", "hybrid-auto-engine"],
+                            value="pipeline", label="本机后端")
+                        lang = gr.Dropdown(choices=["en", "ch", "ch_server", "japan"],
+                                           value="en", label="本机 OCR 语言提示")
+                        with gr.Row():
+                            start_page = gr.Number(label="起始页（0 起）", value=None, precision=0)
+                            end_page = gr.Number(label="结束页（含）", value=None, precision=0)
 
-                with gr.Accordion("翻译模型设置", open=False):
-                    _has_env_key = bool(os.getenv("DEEPSEEK_API_KEY"))
+                with gr.Accordion("翻译设置", open=False):
+                    provider_label = gr.Dropdown(
+                        choices=list(PROVIDERS), value="MiniMax 官方（本地已配置）",
+                        label="翻译后端")
+                    base_url = gr.Textbox(label="Base URL", value=d_url)
+                    model = gr.Textbox(label="模型名", value=d_model)
+                    api_key = gr.Textbox(label="API Key（留空=用本地已配置）",
+                                         type="password", value="", placeholder=zh_hint)
+                    chunk_size = gr.Slider(minimum=1000, maximum=6000, value=3000,
+                                           step=100, label="单块最大字符数")
+                    workers = gr.Slider(minimum=1, maximum=32, value=8, step=1,
+                                        label="翻译并发数（远端 API 8 左右）")
+                    provider_label.change(fn=_apply_provider, inputs=[provider_label],
+                                          outputs=[base_url, model])
 
-                    preset = gr.Dropdown(
-                        choices=[
-                            "DeepSeek 官方",
-                            "Ollama 本地",
-                            "LM Studio 本地",
-                            "自定义",
-                        ],
-                        value="DeepSeek 官方",
-                        label="翻译后端预设",
-                    )
-                    base_url = gr.Textbox(
-                        label="Base URL（OpenAI 兼容接口）",
-                        value="https://api.deepseek.com",
-                        placeholder="https://api.deepseek.com / http://localhost:11434/v1 / ...",
-                    )
-                    model = gr.Textbox(
-                        label="模型名",
-                        value="deepseek-chat",
-                        placeholder="deepseek-chat / qwen2.5:14b / llama3.1:8b ...",
-                    )
-                    api_key = gr.Textbox(
-                        label="API Key（本地后端可任意；留空=DEEPSEEK_API_KEY 环境变量）",
-                        type="password",
-                        value="",
-                        placeholder=("已检测到 DEEPSEEK_API_KEY，可留空"
-                                     if _has_env_key
-                                     else "sk-... / ollama / lm-studio"),
-                    )
-                    chunk_size = gr.Slider(
-                        minimum=500, maximum=5000, value=3000, step=100,
-                        label="单块最大字符数",
-                    )
-                    workers = gr.Slider(
-                        minimum=1, maximum=32, value=8, step=1,
-                        label="翻译并发数（1=串行；远端 API 注意配额，本地按你的硬件）",
-                    )
-
-                    PRESETS = {
-                        "DeepSeek 官方": ("https://api.deepseek.com", "deepseek-chat"),
-                        "Ollama 本地": ("http://localhost:11434/v1", "qwen2.5:14b"),
-                        "LM Studio 本地": ("http://localhost:1234/v1", ""),
-                        "自定义": (None, None),
-                    }
-
-                    def _apply_preset(p):
-                        url, mdl = PRESETS.get(p, (None, None))
-                        return (
-                            gr.update(value=url) if url is not None else gr.update(),
-                            gr.update(value=mdl) if mdl is not None else gr.update(),
-                        )
-
-                    preset.change(fn=_apply_preset, inputs=[preset],
-                                  outputs=[base_url, model])
-
+                with gr.Row():
+                    layout = gr.Dropdown(choices=["minimal", "audit"], value="minimal",
+                                         label="输出布局")
+                    render_html = gr.Checkbox(label="额外生成 HTML 阅读预览", value=False)
+                force = gr.Checkbox(label="强制重做（忽略已存在的中文 MD / OCR 缓存）",
+                                    value=False)
                 run_btn = gr.Button("▶ 开始批量处理", variant="primary", size="lg")
-
-                with gr.Accordion("mineru-api 模型服务", open=False):
-                    api_status = gr.Textbox(
-                        label="状态",
-                        value=ui_status_api(),
-                        interactive=False,
-                        lines=3,
-                    )
-                    with gr.Row():
-                        btn_status = gr.Button("🔄 刷新")
-                        btn_start = gr.Button("▶ 预热")
-                        btn_stop = gr.Button("■ 停止")
-                    btn_status.click(fn=ui_status_api, outputs=[api_status])
-                    btn_start.click(fn=ui_start_api, outputs=[api_status])
-                    btn_stop.click(fn=ui_stop_api, outputs=[api_status])
 
             with gr.Column(scale=2, min_width=520):
                 gr.Markdown("### 进度")
-                log_box = gr.Textbox(
-                    label="日志",
-                    lines=24,
-                    max_lines=60,
-                    autoscroll=True,
-                    interactive=False,
-                )
-                gr.Markdown("### 输出文件")
+                log_box = gr.Textbox(label="日志", lines=24, max_lines=60,
+                                     autoscroll=True, interactive=False)
+                gr.Markdown("### 输出")
                 with gr.Row():
                     out_dir_box = gr.Textbox(
-                        label="输出根目录（每个 PDF 的产物在 <pdf名>/auto/ 下）",
-                        value=str(OUTPUT_ROOT),
-                        interactive=False,
-                        scale=4,
-                    )
-                    open_dir_btn = gr.Button("📂 打开文件夹", scale=1)
-                    open_dir_status = gr.Textbox(
-                        label="操作结果",
-                        value="",
-                        interactive=False,
-                        visible=False,
-                    )
-                open_dir_btn.click(fn=ui_open_output_dir, outputs=[out_dir_box])
-                en_files = gr.File(
-                    label="英文 Markdown（已完成）",
-                    interactive=False,
-                    file_count="multiple",
-                )
-                zh_files = gr.File(
-                    label="中文 Markdown（已完成）",
-                    interactive=False,
-                    file_count="multiple",
-                )
+                        label=f"输出根目录（每个 PDF 一个子目录）", value=str(OUTPUT_ROOT),
+                        interactive=False, scale=4)
+                    open_btn = gr.Button("📂 打开文件夹", scale=1)
+                open_btn.click(fn=ui_open_output_dir, outputs=[out_dir_box])
+                en_files = gr.File(label="英文 Markdown（已完成）",
+                                   interactive=False, file_count="multiple")
+                zh_files = gr.File(label="中文 Markdown（已完成）",
+                                   interactive=False, file_count="multiple")
+                html_files = gr.File(label="HTML 预览（可选）",
+                                     interactive=False, file_count="multiple")
+                zip_files = gr.File(label="完整交付 ZIP（含图片）",
+                                    interactive=False, file_count="multiple")
 
         run_btn.click(
             fn=run_workflow,
-            inputs=[
-                pdf_input, md_input,
-                do_convert, do_translate, reuse_server,
-                backend, lang, start_page, end_page,
-                model, base_url, chunk_size, workers, api_key,
-            ],
-            outputs=[log_box, en_files, zh_files],
+            inputs=[pdf_input, md_input, do_convert, do_translate, ocr_mode_label,
+                    ocr_model, backend, lang, start_page, end_page,
+                    provider_label, base_url, model, chunk_size, workers,
+                    api_key, force, layout, render_html],
+            outputs=[log_box, en_files, zh_files, html_files, zip_files],
         )
 
         gr.Markdown(
-            "复用模式下，mineru-api 在首次批处理时启动（约 1 分钟加载模型），"
-            "之后每个 PDF 都走 HTTP 提交、无重复加载开销。关闭 Gradio 时服务自动结束。"
+            "产物结构：`输出根目录/<pdf 名>/` 内含 `<pdf 名>_zh.md`、`<pdf 名>.pdf`、"
+            "`images/`、`<pdf 名>_en.md`、`_mineru/`。中文 MD 已存在时自动跳过，"
+            "OCR 结果缓存在 `.cache/`，重跑不重复消耗 MinerU 配额。"
         )
-
-    return app
+    return ui
 
 
 if __name__ == "__main__":
-    ui = build_ui()
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    ui.queue().launch(
+    port = int(os.getenv("PDF2ZH_PORT", os.getenv("GRADIO_SERVER_PORT", "7862")))
+    build_ui().queue().launch(
         inbrowser=True,
         server_name="127.0.0.1",
-        server_port=7860,
+        server_port=port,
         theme=gr.themes.Soft(),
         allowed_paths=[str(OUTPUT_ROOT)],
     )

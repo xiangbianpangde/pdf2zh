@@ -11,6 +11,7 @@ venv/
 env/
 
 # Output artifacts
+.checkpoints/
 webui_output/
 output/
 *.log

@@ -21,13 +21,14 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from pathlib import Path
 
 import config
 import pipeline
 from config import ConfigError
-from pipeline import PipelineError
+from pipeline import PipelineError, safe_stem
 
 log = logging.getLogger("pdf2zh")
 DEFAULT_OUT = Path("./output")
@@ -66,12 +67,21 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--skip-translate", action="store_true", help="只做 OCR，不翻译")
 
     o = p.add_argument_group("输出与续跑")
+    o.add_argument("--layout", choices=["minimal", "audit"], default="minimal",
+                   help="输出布局：minimal=pdf+中英 MD+images/（默认）；audit=额外写 manifest/validation/_mineru")
+    o.add_argument("--html", dest="render_html", action="store_true",
+                   help="额外生成英文/中文 HTML 阅读预览（不等于原 PDF 版式复刻）")
+    o.add_argument("--no-html", dest="render_html", action="store_false",
+                   help=argparse.SUPPRESS)
+    p.set_defaults(render_html=False)
     o.add_argument("--no-keep-english", dest="keep_english", action="store_false",
-                   help="不保留英文原文与 _mineru/（默认保留）")
+                   help="不保留英文原文与审计附产物（默认保留）")
     o.add_argument("--force", action="store_true", help="中文 MD 已存在也重做")
     o.add_argument("--refresh", action="store_true",
                    help="忽略 OCR 缓存，强制重新调用 MinerU 云 API")
     o.add_argument("--timeout", type=int, default=900, help="单份 OCR 超时秒数")
+    o.add_argument("--parallelism", type=int, default=1,
+                   help="同时处理的 PDF 数（默认 1；云 OCR/翻译建议从 2 开始）")
 
     p.add_argument("--doctor", action="store_true", help="只检查凭据配置后退出")
     p.add_argument("-v", "--verbose", action="store_true", help="DEBUG 日志")
@@ -124,52 +134,65 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[FATAL] PDF 不存在：{', '.join(str(m) for m in missing)}", file=sys.stderr)
         return 2
 
+    stems = [safe_stem(pdf) for pdf in args.pdfs]
+    duplicates = sorted({stem for stem in stems if stems.count(stem) > 1})
+    if duplicates:
+        print(f"[FATAL] 输入文件名映射到相同输出目录：{', '.join(duplicates)}", file=sys.stderr)
+        return 2
+
     out_root = args.out_root.expanduser().resolve()
     out_root.mkdir(parents=True, exist_ok=True)
     print(f"输出根目录：{out_root}")
     print(f"共 {len(args.pdfs)} 份 PDF\n" + "=" * 68)
 
+    if args.parallelism <= 0 or args.parallelism > 16:
+        print("[FATAL] --parallelism 必须在 1 到 16 之间", file=sys.stderr)
+        return 2
     t_all = time.time()
     ok, failed, skipped = 0, 0, 0
-    for i, pdf in enumerate(args.pdfs, 1):
-        print(f"\n=== [{i}/{len(args.pdfs)}] {pdf.name} ===")
-        t0 = time.time()
 
+    def process_one(item: tuple[int, Path]):
+        i, pdf = item
         def emit(line: str) -> None:
-            print(line, flush=True)
-
+            print(f"[{i}/{len(args.pdfs)}] {pdf.name}: {line}", flush=True)
         def on_progress(done: int, total: int, idx: int) -> None:
-            print(f"        [{done}/{total}] 段落 #{idx + 1} 完成", flush=True)
-
+            print(f"[{i}/{len(args.pdfs)}] {pdf.name}: [{done}/{total}] 段落 #{idx + 1} 完成", flush=True)
+        started = time.time()
         try:
-            res = pipeline.process(
-                pdf, out_root,
-                ocr_mode=args.ocr, ocr_model=args.ocr_model,
-                backend=args.backend, lang=args.lang,
-                provider=args.provider, base_url=args.base_url,
-                model=args.model, api_key=args.api_key,
+            result = pipeline.process(
+                pdf, out_root, ocr_mode=args.ocr, ocr_model=args.ocr_model,
+                backend=args.backend, lang=args.lang, provider=args.provider,
+                base_url=args.base_url, model=args.model, api_key=args.api_key,
                 chunk_size=args.chunk_size, workers=args.workers,
-                keep_english=args.keep_english,
-                skip_translate=args.skip_translate,
-                force=args.force, use_cache=not args.refresh,
-                timeout=args.timeout, emit=emit, on_progress=on_progress,
-            )
-        except (PipelineError, ConfigError) as exc:
-            print(f"  ✗ 失败：{exc}", file=sys.stderr)
-            failed += 1
-            continue
-        except KeyboardInterrupt:
-            print("\n已中断（已完成的 PDF 保留，下次运行自动跳过）", file=sys.stderr)
-            return 130
+                keep_english=args.keep_english, skip_translate=args.skip_translate,
+                force=args.force, use_cache=not args.refresh, timeout=args.timeout,
+                layout=args.layout, render_html=args.render_html,
+                emit=emit, on_progress=on_progress)
+            return i, pdf, result, None, time.time() - started
+        except Exception as exc:
+            return i, pdf, None, exc, time.time() - started
 
-        if res.skipped:
-            skipped += 1
-        elif res.translated or args.skip_translate:
-            ok += 1
-        else:
-            failed += 1
-        print(f"  — {time.time() - t0:.1f}s｜目录 {res.out_dir.name}/"
-              f"｜图片 {res.n_images} 张｜{'中文MD已生成' if res.translated else '仅OCR'}")
+    try:
+        with ThreadPoolExecutor(max_workers=min(args.parallelism, len(args.pdfs))) as pool:
+            futures = [pool.submit(process_one, (i, pdf)) for i, pdf in enumerate(args.pdfs, 1)]
+            for future in as_completed(futures):
+                i, pdf, res, error, elapsed = future.result()
+                print(f"\n=== [{i}/{len(args.pdfs)}] {pdf.name} ===")
+                if error:
+                    print(f"  ✗ 失败：{error}", file=sys.stderr)
+                    failed += 1
+                    continue
+                if res.skipped:
+                    skipped += 1
+                elif res.translated or args.skip_translate:
+                    ok += 1
+                else:
+                    failed += 1
+                print(f"  — {elapsed:.1f}s｜目录 {res.out_dir.name}/"
+                      f"｜图片 {res.n_images} 张｜{'中文MD已生成' if res.translated else '仅OCR'}")
+    except KeyboardInterrupt:
+        print("\n已中断（已完成的 PDF 与翻译分块检查点保留，下次用相同参数重跑）", file=sys.stderr)
+        return 130
 
     print("\n" + "=" * 68)
     print(f"完成 {ok}｜跳过 {skipped}｜失败 {failed}｜"

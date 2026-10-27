@@ -151,7 +151,13 @@ def precision_extract(pdf: Path, outdir: Path, model: str = "vlm") -> Path:
     if status != 200 or "zip" not in resp[0]:
         raise MinerUError(f"下载结果失败 HTTP {status}（Content-Type={resp[0]}）")
     outdir.mkdir(parents=True, exist_ok=True)
-    zipfile.ZipFile(io.BytesIO(resp[1])).extractall(outdir)
+    with zipfile.ZipFile(io.BytesIO(resp[1])) as archive:
+        root = outdir.resolve()
+        for member in archive.infolist():
+            target = (outdir / member.filename).resolve()
+            if not target.is_relative_to(root):
+                raise MinerUError(f"解包路径越界：{member.filename}")
+        archive.extractall(outdir)
     md = outdir / "full.md"
     if not md.is_file():
         raise MinerUError(f"解包后未找到 full.md（{outdir} 内容异常）")

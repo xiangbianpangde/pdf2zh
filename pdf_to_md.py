@@ -1,4 +1,8 @@
-"""PDF -> English Markdown via MinerU.
+"""PDF -> English Markdown via 本机 mineru CLI（遗留脚本）。
+
+新项目默认走云 OCR + 翻译的一站式管线：
+    python pdf_to_zh_md.py <pdf>          # MinerU 云 API + MiniMax，产物含中文 md/pdf/images
+本脚本只在需要本机 mineru（含页码范围 -s/-e）时使用。
 
 Usage:
     python pdf_to_md.py <pdf_path> [-o output_dir] [-b backend] [-l lang]

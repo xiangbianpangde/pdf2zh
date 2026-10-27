@@ -9,6 +9,7 @@ Usage:
 """
 import argparse
 import os
+import json
 import re
 import sys
 import time
@@ -128,6 +129,8 @@ def translate_chunks_concurrent(
     model: str = "deepseek-chat",
     max_workers: int = 8,
     on_progress: Callable[[int, int, int], None] | None = None,
+    checkpoint_path: Path | None = None,
+    checkpoint_context: str = "",
 ) -> list[str]:
     """Translate chunks in parallel. Returns results in original chunk order.
 
@@ -138,25 +141,57 @@ def translate_chunks_concurrent(
     results: list[str] = [""] * n
     if n == 0:
         return results
+
+    # A checkpoint belongs to the exact source/model/config fingerprint supplied
+    # by the caller. Persist each successful chunk atomically before progressing.
+    completed_indices: set[int] = set()
+    if checkpoint_path and checkpoint_path.exists():
+        try:
+            saved = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            if (saved.get("model") == model and saved.get("context") == checkpoint_context
+                    and saved.get("chunks") == chunks):
+                for key, value in saved.get("results", {}).items():
+                    idx = int(key)
+                    if 0 <= idx < n and isinstance(value, str) and value:
+                        results[idx] = value
+                        completed_indices.add(idx)
+        except (OSError, ValueError, TypeError):
+            pass
+    if checkpoint_path and completed_indices:
+        print(f"  ↻ 续跑：已恢复 {len(completed_indices)}/{n} 个翻译块", flush=True)
+
+    def persist() -> None:
+        if not checkpoint_path:
+            return
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"model": model, "context": checkpoint_context, "chunks": chunks,
+                   "results": {str(i): results[i] for i in sorted(completed_indices)}}
+        temporary = checkpoint_path.with_suffix(checkpoint_path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, checkpoint_path)
+
+    pending = [i for i in range(n) if i not in completed_indices]
+    if on_progress:
+        for done, idx in enumerate(sorted(completed_indices), 1):
+            on_progress(done, n, idx)
     if max_workers <= 1:
-        for i, chunk in enumerate(chunks):
-            results[i] = translate_chunk(client, chunk, model=model)
+        for idx in pending:
+            results[idx] = translate_chunk(client, chunks[idx], model=model)
+            completed_indices.add(idx)
+            persist()
             if on_progress:
-                on_progress(i + 1, n, i)
+                on_progress(len(completed_indices), n, idx)
         return results
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        fut_to_idx = {
-            ex.submit(translate_chunk, client, chunk, model): i
-            for i, chunk in enumerate(chunks)
-        }
-        completed = 0
+        fut_to_idx = {ex.submit(translate_chunk, client, chunks[i], model): i for i in pending}
         for fut in as_completed(fut_to_idx):
             idx = fut_to_idx[fut]
             results[idx] = fut.result()
-            completed += 1
+            completed_indices.add(idx)
+            persist()
             if on_progress:
-                on_progress(completed, n, idx)
+                on_progress(len(completed_indices), n, idx)
     return results
 
 

@@ -31,7 +31,7 @@ def main():
         description="Drive the running pdf2zh Gradio UI to batch-process PDFs"
     )
     parser.add_argument("pdf_dir", type=Path, help="Directory of PDFs to submit")
-    parser.add_argument("--url", default="http://127.0.0.1:7860", help="Gradio URL")
+    parser.add_argument("--url", default="http://127.0.0.1:7862", help="Gradio URL")
     parser.add_argument("--workers", type=int, default=8, help="Translation concurrency")
     parser.add_argument("--model", default="deepseek-chat",
                         help="Model name (deepseek-chat / qwen2.5:14b / ...)")
@@ -61,16 +61,21 @@ def main():
         md_files=None,
         do_convert=True,
         do_translate=True,
-        reuse_server=True,
+        ocr_mode_label="云 API Precision（推荐，需 Token）",
+        ocr_model="vlm",
+        provider_label="DeepSeek 官方",
         backend="pipeline",
         lang="en",
         start_page=-1,
         end_page=-1,
-        model=args.model,
         base_url=args.base_url,
+        model=args.model,
         chunk_size=args.chunk_size,
         workers=args.workers,
         api_key=api_key,
+        force=False,
+        layout="minimal",
+        render_html=False,
         api_name="/run_workflow",
     )
 
@@ -90,7 +95,11 @@ def main():
                 print(f"[{hh()}] outputs() error after done: {e}", flush=True)
 
         if outs:
-            log, en_files, zh_files = outs[-1]
+            values = list(outs[-1])
+            log = values[0] if values else ""
+            en_files = values[1] if len(values) > 1 else None
+            zh_files = values[2] if len(values) > 2 else None
+            zip_files = values[4] if len(values) > 4 else None
             en_count = len(en_files) if en_files else 0
             zh_count = len(zh_files) if zh_files else 0
             tail = (log or "")[-300:]
@@ -113,7 +122,11 @@ def main():
     try:
         final = job.result()
         if final:
-            log, en_files, zh_files = final
+            values = list(final)
+            log = values[0] if values else ""
+            en_files = values[1] if len(values) > 1 else None
+            zh_files = values[2] if len(values) > 2 else None
+            zip_files = values[4] if len(values) > 4 else None
             print(f"  English MDs: {len(en_files) if en_files else 0}/{len(pdfs)}",
                   flush=True)
             print(f"  Chinese MDs: {len(zh_files) if zh_files else 0}/{len(pdfs)}",

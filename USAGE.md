@@ -1,81 +1,118 @@
-# pdf2zh 使用说明（一页纸版）
+# pdf2zh 使用说明
 
-把英文 PDF 论文转成中文 Markdown 的小工具。**双击 `pdf2zh.bat` 就能用**。
+英文 PDF → 中文 Markdown。默认使用 MinerU 云端解析 + 已配置的 MiniMax 翻译，Mac 不需要本地 OCR 模型。
 
-## 系统要求
+## 30 秒上手
 
-- **Windows 10 / 11**
-- **Python 3.10、3.11 或 3.12**（3.13 不行）
-  - 没装的话去 https://www.python.org/downloads/ 下载
-  - **安装时一定要勾**「Add Python to PATH」
-- 可选：**NVIDIA 显卡 + ≥4 GB 显存**（CPU 也能跑，慢 5-10 倍）
-- 可选：**DeepSeek API key**（在 https://platform.deepseek.com 注册获取）
-  - 不想用 DeepSeek？可以在 UI 里切到 Ollama 或 LM Studio 本地模型
-
-## 安装与启动
-
-1. 拿到 `pdf2zh` 文件夹（解压你收到的 zip）
-2. **双击文件夹里的 `pdf2zh.bat`**
-3. 首次启动会自动完成：
-   - 创建 `.venv\`（虚拟环境）
-   - 安装依赖（**5-10 分钟，下载约 7 GB**，请耐心等）
-   - 检测到 NVIDIA 显卡的话，问你装不装 CUDA 版 PyTorch（**建议 Y**）
-   - 问你的 DeepSeek API key（粘上去回车，保存到本地 `.env`）
-4. 然后浏览器会自动弹出 http://127.0.0.1:7860 — 这就是主界面
-
-之后每次双击 `pdf2zh.bat` 都是**几秒钟开浏览器**，不再下载。
-
-## 怎么用界面
-
-1. **左边「PDF 文件」**：拖入一个或多个英文 PDF
-2. **保持默认勾选**：`PDF → Markdown` + `Markdown → 中文` + `复用 mineru-api 常驻服务`
-3. **点 ▶ 开始批量处理**
-4. **右边「日志」**：实时进度
-5. **右边「输出文件」**：每完成一个就出现下载链接；点 📂 按钮打开输出文件夹
-
-输出位置（每个 PDF 一个子文件夹）：
-```
-pdf2zh\webui_output\<论文名>\auto\
-    <论文名>.md       ← 英文 markdown
-    <论文名>_zh.md    ← 中文 markdown（这是你要的）
-    images\           ← 抽取的图片
+```bash
+source .venv/bin/activate
+python pdf_to_zh_md.py --doctor
+python pdf_to_zh_md.py 论文.pdf -o ./output
 ```
 
-## 关闭服务
+## 默认输出
 
-直接关掉黑色命令行窗口即可。
+```text
+output/
+└── 论文/
+    ├── 论文.pdf
+    ├── 论文_en.md
+    ├── 论文_zh.md
+    └── images/
+```
 
-## 切换本地模型（Ollama / LM Studio）
+这是默认的 **minimal** 布局。单独下载 MD 文件不会携带 `images/`，建议从 UI 下载“完整交付 ZIP”，或直接打包整个子目录。
 
-不想用 DeepSeek API 的话：
+### 审计布局
 
-1. 装 [Ollama](https://ollama.com)，命令行跑 `ollama pull qwen2.5:14b`
-2. 在 UI 的「翻译模型设置」面板里，「翻译后端预设」选 **Ollama 本地**
-3. 自动填好 Base URL 和模型名，直接开始
+```bash
+python pdf_to_zh_md.py 论文.pdf -o output --layout audit
+```
 
-LM Studio 同理：先在 LM Studio Developer 页签启动 Local Server，再在 UI 里选「LM Studio 本地」。
+`audit` 额外输出 `manifest.json`、`validation.json` 和可用的 `_mineru/` sidecar。缓存和 checkpoint 始终留在交付目录外。
+
+### HTML 阅读预览
+
+```bash
+python pdf_to_zh_md.py 论文.pdf -o output --html
+```
+
+HTML 是流式阅读预览，不是 PDF 原生版式复刻。表格、图片引用和 LaTeX 会保留；默认不注入外部脚本，公式以可复制的 LaTeX 文本展示。
+
+## CLI 参数
+
+| 参数 | 作用 |
+|---|---|
+| `-o, --out-root` | 输出根目录，默认 `./output` |
+| `--ocr precision` | MinerU 云 API Precision，默认 |
+| `--ocr flash` | 小文件免 Token 云解析，受 MinerU 限制 |
+| `--ocr local` | 本机 MinerU CLI；Mac 默认不推荐 |
+| `--layout minimal` | 默认最简目录 |
+| `--layout audit` | 额外输出 manifest/validation/_mineru |
+| `--html` | 额外生成中英文 HTML 阅读预览 |
+| `--skip-translate` | 只做 OCR |
+| `--force` | 重做交付和翻译，并跳过旧 OCR 缓存 |
+| `--refresh` | 重新调用 OCR；旧缓存保留 |
+| `--workers` | 翻译并发，远端 API 通常 4–8 |
+| `--no-keep-english` | 不保留英文原文和审计 sidecar |
+
+## 断点续跑与失败行为
+
+- OCR 缓存按 PDF SHA-256 和 OCR 参数指纹分隔，并要求完整 receipt + `READY` 标记才会命中。
+- 缓存与交付目录分离，`--force` 不会复用旧 OCR 缓存。
+- 翻译按块写 checkpoint；中断可重跑，已完成块会恢复。
+- 翻译失败时保留英文 MD 和 checkpoint，不覆盖已有中文内容，不生成完整交付 ZIP。
+- 只有中英文资源校验通过，才会被判断为完整交付物。
+
+## 图片资源校验
+
+硬校验包括：
+
+- Markdown 本地图片都存在于同级 `images/`；不允许绝对路径、`..`、`.cache` 或软链接
+- 文件实际编码可解码，扩展名与 MIME 一致
+- 外部图片引用不能作为便携交付通过
+- 英文/中文图片引用数量和顺序必须一致
+- SVG 不允许脚本、外部资源、事件属性和危险实体
+
+校验失败会让管线失败，而不是生成一个看似完成的中文文件。
+
+## Web UI
+
+```bash
+./start_mac.sh
+```
+
+UI 与 CLI 共用同一管线。可选 `minimal/audit`、HTML 预览；完成后提供英文 MD、中文 MD、HTML（如启用）和完整 ZIP。
+
+## OCR 方案判断
+
+当前先不直接换掉 MinerU：
+
+- OpenDataLab OmniDocBench v1.6_full 官方综合榜：TeleOCR 96.91、OvisOCR2 96.47、PaddleOCR-VL-1.6 96.34、MinerU2.5-Pro 95.75、GLM-OCR 95.22。
+- 这些 Overall 只代表文本/表格/公式综合指标，不等于图片资源完整性、速度和成本。
+- WeVisDoc 作者自报 4B 95.38、2B 95.06，但官方 prompt 明确忽略 figures content，因此不能单独解决本项目的图片问题。
+- 下一步应在 RTX 4090 远程主机上，对 MinerU、PaddleOCR-VL 完整管线和 WeVisDoc 对照跑同一组 PDF；当前只确认主机环境，尚未下载权重或完成实测。
+
+官方来源：
+
+- https://raw.githubusercontent.com/opendatalab/OmniDocBench/main/README.md
+- https://github.com/Tencent/WeVisDoc
+- https://raw.githubusercontent.com/Tencent/WeVisDoc/main/wevisdoc/prompts.py
 
 ## 常见问题
 
-| 现象 | 怎么办 |
+| 现象 | 处理 |
 |---|---|
-| `[ERROR] Python not found` | 没装 Python 或安装时没勾「Add to PATH」。重装 Python 并勾选 |
-| `[ERROR] Python 3.13 is not supported` | 装一个 3.10/3.11/3.12 版本，可以多版本共存，bat 会用 `python` 命令找到的那个 |
-| 首次 `pip install` 卡在某个包 | 网络问题。删掉 `.venv\` 重新双击；或挂代理重试 |
-| GPU 跑着跑着显存炸 | UI 里把后端从 hybrid/vlm 切回 `pipeline`（默认就是它） |
-| 翻译特别慢 | UI「翻译并发数」调大（DeepSeek 8 左右，本地模型按显存调） |
-| 想停止当前批处理 | 直接关命令行窗口；下次启动会跳过已经完成的 PDF |
+| 图片在 Markdown 里打不开 | 检查完整 ZIP 或 `images/`；管线现在会在交付前硬校验 |
+| 出现同名图片 | 管线会用内容哈希区分冲突，并禁止不明确的 basename 猜测 |
+| 翻译中断 | 保留 checkpoint，降低 `--workers` 后重跑 |
+| 同名 PDF 被换掉 | 管线比较 PDF SHA-256；请使用新输出根目录或明确 `--force` |
+| 只下载 MD 后没图 | 这是下载方式问题；使用完整 ZIP |
+| `MinerU` 401 | 检查 `.secrets/mineru.json` 的 token |
 
-## 文件清单（参考）
+## 验证命令
 
-- `pdf2zh.bat` — 双击这个
-- `app.py` — Gradio 主程序（bat 自动调）
-- `pdf_to_md.py` / `translate_md.py` / `pdf_to_zh_md.py` — 命令行单功能脚本
-  - `pdf_to_zh_md.py paper.pdf -o out/` — 默认 **MinerU 云 API OCR + MiniMax-M3 翻译**（无需本地模型）；加 `--ocr local` 回退本地 mineru
-- `mineru_api.py` — MinerU 云 API OCR 模块（v4 Precision）
-- `tools/test_batch_via_ui.py` — 通过 HTTP 自动化驱动 UI 的脚本（高级）
-- `requirements.txt` / `README.md` / `LICENSE` — 项目元信息
-- `.venv\` — 虚拟环境（首次启动自动建，不要手动删）
-- `.env` — 你的 API key（首次启动询问后保存，**不要提交到 git**）
-- `.secrets\` — 云 API 凭据（mineru.json / minimax.json，**git 已忽略**）
-- `webui_output\` — 输出目录（含日志和 markdown）
+```bash
+.venv/bin/python -m unittest tools.test_resource_contract tools.test_translation_contract
+.venv/bin/python -m py_compile pipeline.py resource_contract.py html_output.py mineru_api.py pdf_to_zh_md.py app.py
+```
