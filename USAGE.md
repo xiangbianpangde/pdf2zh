@@ -113,6 +113,8 @@ UI 与 CLI 共用同一管线。可选 `minimal/audit`、HTML 预览；完成后
 ## 验证命令
 
 ```bash
-.venv/bin/python -m unittest tools.test_resource_contract tools.test_translation_contract
+.venv/bin/python -m pytest          # 14 项契约测试，与 CI 一致
 .venv/bin/python -m py_compile pipeline.py resource_contract.py html_output.py mineru_api.py pdf_to_zh_md.py app.py
 ```
+
+`pytest.ini` 把收集范围限定在契约套件；`tools/test_batch_via_ui.py` 是需要在线 Gradio 的手动驱动，不会被收集。
