@@ -32,7 +32,7 @@ pdf2zh-pipeline --doctor
 pdf2zh-pipeline paper.pdf -o ./output
 ```
 
-三个 console script：`pdf2zh-pipeline`（PDF → 中文 MD）、`pdf2zh-translate`（已有 MD → 中文）、`pdf2zh-webui`（本地 Gradio UI，端口 7862）。不装包也可以：`pip install -r requirements.txt` 后跑 `python -m pdf2zh.cli`（`pytest.ini` 已把 `src/` 放进 `pythonpath`）。
+三个 console script：`pdf2zh-pipeline`（PDF → 中文 MD）、`pdf2zh-translate`（已有 MD → 中文）、`pdf2zh-webui`（本地 Gradio UI，端口 7862）。不想装包时：`pip install -r requirements.txt`，然后 `PYTHONPATH=src python -m pdf2zh.cli`（`pytest.ini` 的 `pythonpath=src` 只对 pytest 生效，不会让普通 `python` 找到包）。
 
 凭据：
 
