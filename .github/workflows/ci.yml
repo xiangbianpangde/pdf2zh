@@ -18,11 +18,13 @@ jobs:
 
       # The suite only exercises the delivery contract (chunking, checkpoints,
       # image normalization, manifest/zip contents). MinerU, torch and gradio are
-      # needed for a real OCR/translation run, not for these checks.
+      # needed for a real local-OCR/UI run, not for these checks. Installing the
+      # documented cloud requirement file keeps it from drifting away from the
+      # imports the code actually needs.
       - name: Install test-only dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest openai markdown-it-py Pillow
+          python -m pip install -r requirements-api.txt pytest
 
       - name: Run tests
         run: python -m pytest -q

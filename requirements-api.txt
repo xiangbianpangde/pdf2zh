@@ -1,0 +1,16 @@
+# Cloud path only: MinerU cloud OCR + an OpenAI-compatible translation model.
+#
+# Covers the CLI entry points (pdf_to_zh_md.py, translate_md.py, pdf_to_md.py)
+# with `--ocr precision|flash`, including HTML preview (--html), the image
+# resource contract and the delivery ZIP.
+#
+# Deliberately absent:
+#   mineru[all]  -> only `--ocr local` needs it (it installs the mineru CLI and
+#                   pulls torch, ~1.8 GB on Apple Silicon)
+#   gradio       -> only app.py (the Web UI) needs it
+#
+# Install this instead of requirements.txt when OCR runs in the cloud:
+#   pip install -r requirements-api.txt
+openai>=1.30
+markdown-it-py>=3.0
+Pillow>=10.0

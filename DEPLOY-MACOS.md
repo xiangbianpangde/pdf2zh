@@ -32,7 +32,8 @@ pdf2zh/
 ## 启动（macOS）
 
 ```bash
-cd /Users/xbpd/Projects/pdf2zh
+# 克隆位置随你；下文的路径都相对仓库根
+cd ~/Projects/pdf2zh
 
 # 1) 激活 venv（每次新 shell 都跑）
 source .venv/bin/activate

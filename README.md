@@ -1,5 +1,7 @@
 # pdf2zh
 
+> **注意重名**：本仓库是自己的“PDF → 中文 Markdown 交付管线”实现，**不是** PyPI / GitHub 上同名的 PDFMathTranslate 项目。`pip install pdf2zh` 装到的是那个项目，与本仓库无关；本仓库没有可安装的包，只有脚本入口（见下方“快速开始”）。
+
 英文 PDF → 中文 Markdown 的可验证交付管线：**MinerU 云 API 解析** + **OpenAI 兼容翻译模型**（默认本地配置的 MiniMax-M3）。
 
 输入一份 PDF，默认得到一个自包含目录：中文 MD、英文 MD、原 PDF 和 `images/`；可选生成 HTML 阅读预览、审计 manifest/validation，以及包含图片的 ZIP。
@@ -17,13 +19,23 @@
 
 ## 快速开始
 
+两种安装，按是否需要本地 OCR / Web UI 选一种：
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+
+# A. 只要云端 OCR + 翻译（约 10 MB 依赖）
+pip install -r requirements-api.txt
+
+# B. 需要 --ocr local 或 Web UI（含 mineru[all]，会拉 torch，约 1.8 GB）
+# pip install -r requirements.txt
+
 python pdf_to_zh_md.py --doctor
 python pdf_to_zh_md.py paper.pdf -o ./output
 ```
+
+`requirements-api.txt` 覆盖 CLI 云端路径（`--ocr precision|flash`、`--html`、资源校验、交付 ZIP）；`requirements.txt` 额外提供本地 `mineru` CLI 与 Gradio UI。两者都只装了各自需要的东西，不要叠加安装。
 
 凭据：
 
