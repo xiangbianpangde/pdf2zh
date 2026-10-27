@@ -12,8 +12,11 @@
 - 中文 PDF 不翻译（本身已是中文），英文 Manual 也不翻译（用户只要 MD）
 
 用法：
-    source /Users/xbpd/Projects/pdf2zh/.venv/bin/activate
-    python /Users/xbpd/Projects/pdf2zh/tools/batch_pdf_to_md.py
+    source .venv/bin/activate
+    python tools/batch_pdf_to_md.py
+
+输出目录默认 ~/Documents/usb_md，可用 PDF2ZH_USB_OUT 覆盖；
+U 盘源目录可用 PDF2ZH_USB_ROOT 覆盖。
 """
 from __future__ import annotations
 
@@ -25,12 +28,12 @@ import sys
 import time
 from pathlib import Path
 
-USB_ROOT = Path("/Volumes/xbpd的u盘/说明文档目录")
-DEFAULT_OUT = Path("/Users/xbpd/Projects/pdf2zh/usb_md")
+USB_ROOT = Path(os.getenv("PDF2ZH_USB_ROOT", "/Volumes/xbpd的u盘/说明文档目录"))
+DEFAULT_OUT = Path(os.getenv("PDF2ZH_USB_OUT", str(Path.home() / "Documents" / "usb_md")))
 DEFAULT_BACKEND = "pipeline"
 DEFAULT_LANG = "ch"  # 中文为主；英文 PDF 也能识别
 
-# mineru 装在 /Users/xbpd/Projects/pdf2zh/.venv/bin/ 下但未必在 PATH，
+# mineru 装在项目 .venv/bin/ 下但未必在 PATH，
 # 让 subprocess 能直接调 mineru / mineru-api 等命令。
 PROJECT_VENV_BIN = Path(__file__).resolve().parent.parent / ".venv" / "bin"
 os.environ["PATH"] = (

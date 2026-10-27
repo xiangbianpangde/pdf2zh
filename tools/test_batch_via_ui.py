@@ -4,7 +4,7 @@ Equivalent to: open browser, drag all PDFs in, click "开始批量处理", wait.
 Polls progress and prints concise status every 20s.
 
 Usage:
-    python tools/test_batch_via_ui.py <pdf_dir> [--url http://127.0.0.1:7860]
+    python tools/test_batch_via_ui.py <pdf_dir> [--url http://127.0.0.1:7862]
                                                 [--workers 8]
 """
 import argparse
