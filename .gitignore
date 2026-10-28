@@ -1,36 +1,24 @@
+# Runtime state must never enter the repository.
+.secrets/
+.env
+.env.*
+
+# Pipeline output and caches
+output/
+.cache/
+.checkpoints/
+
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.egg-info/
-.eggs/
-
-# Virtual environments
+.pytest_cache/
 .venv/
 venv/
 env/
-
-# Output artifacts
-.checkpoints/
-output/
-*.log
-
-# Build artifacts
+*.egg-info/
 build/
 dist/
 
-# Local env / secrets
-.env
-.env.*
-!.env.example
-.secrets/
-
-# IDE / editor
-.vscode/
-.idea/
-*.swp
-*~
+# OS / editors
 .DS_Store
-
-# OS
-Thumbs.db
+*.swp
