@@ -12,6 +12,12 @@ output/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
 
 # OS / editors
 .DS_Store
