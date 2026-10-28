@@ -66,6 +66,7 @@ JSON
 - `context = sha256(base_url|model|chunk_size|源PDF sha256)`。
 - 只有 `model`、`base_url`、`context`、`chunks` 四项完全一致才恢复；任一项变化视为新任务。
 - 每完成一块就原子写盘，中断后重跑只补缺失块（日志会打印「续跑：已恢复 n/m」）。
+- **被 kill 时正在请求的块没有结果可存**：它们会被重发，最多等于 `--workers` 块。已有结果的块永不重发（`tests/resume_smoke.py` 用真实 SIGKILL 验证过这条边界）。
 - 全部完成且校验通过后删除检查点。
 
 ## 6. 失败语义

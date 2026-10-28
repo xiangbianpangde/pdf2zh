@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-10-28
+
+- 真实中断续跑验证：新增 `tests/resume_smoke.py`，用真实 SIGKILL 杀掉翻译中的 CLI 子进程后重跑同一命令——续跑请求数等于缺失块数，**已完成块 0 次重发**，在途块重发上限为 `--workers`（该边界已写入 `references/translation.md`）。
+- 8 份并发压测：44.1 s vs 串行 269.5 s（6.1×），8/8 成功、无 429、峰值 RSS 96.9 MB，8 份 `manifest.source.sha256` 与输入逐一匹配（无串档）。
+- `docs/M3-STRESS.md` 补齐这两节的命令与数据；`docs/ROADMAP.md` 对应缺口关闭。
+
 ## 0.3.0 - 2026-10-28
 
 - M4 收口：新增 `references/troubleshooting.md`（凭据 / 解析 / 校验 / 翻译 / 重跑五类现象 → 原因 → 处置）。

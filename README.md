@@ -67,6 +67,8 @@ node ~/.pi/agent/skills/task/skill-authoring/scripts/skill_validator/pi_discover
 | 复用（完成标记 / OCR 缓存） | 均 0.13 s、**0 次外部调用** |
 | 失败隔离（4 份混入超页文件） | 3 成功 1 失败，退出码 1，失败者无交付目录 |
 | 翻译并发 1 → 8 | 102.2 s → 38.8 s（**2.6×**），端点 16 并发无 429 |
+| 8 份并发（flash） | 44.1 s vs 串行 269.5 s（**6.1×**），8/8 成功，峰值 RSS 96.9 MB |
+| 翻译中途 SIGKILL 后重跑 | 只补缺失块，已完成块 **0 次**重发，最终交付有效 |
 | Pi 内真实调用（`/skill:pdf-to-md`） | 直接产出交付目录，模型报告与磁盘产物一致 |
 
 ## 目录
@@ -87,7 +89,7 @@ node ~/.pi/agent/skills/task/skill-authoring/scripts/skill_validator/pi_discover
     │   ├── translation.md    # 模型参数、端点拼接、网关兼容、检查点
     │   └── troubleshooting.md # 现象 → 原因 → 处置
     ├── scripts/              # 零第三方依赖，Python 3.10+ 标准库
-    └── tests/                # 54 项离线用例 + trigger_check.py（需 --confirm）
+    └── tests/                # 54 项离线用例 + resume_smoke.py / trigger_check.py（opt-in）
 ```
 
 ## 验证
@@ -95,6 +97,9 @@ node ~/.pi/agent/skills/task/skill-authoring/scripts/skill_validator/pi_discover
 ```bash
 # 离线测试（不需要网络与凭据）
 cd pdf-to-md && python3 -m unittest discover -s tests -t tests
+
+# 真实中断续跑（离线，几秒，会真的 SIGKILL 一个子进程）
+cd pdf-to-md && python3 tests/resume_smoke.py
 
 # 触发检查：静态描述检查 + 路由模拟（--confirm 才会发起 6 个短请求）
 python3 pdf-to-md/tests/trigger_check.py --dry-run
