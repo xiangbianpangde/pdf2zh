@@ -2,7 +2,7 @@
 
 把 PDF 转成可移植 Markdown 的 **Pi Skill**：MinerU 云 API 解析（保留标题结构、表格、公式、图片）+ 任意 OpenAI 兼容模型翻译（可选，参数随时可换）。
 
-> 状态：**M1–M3 已实现并通过真实验证**（含批量压测，见 [docs/M3-STRESS.md](docs/M3-STRESS.md)）。M4（skill 收口）见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+> 状态：**M1–M4 完成**：已部署为 Pi skill，并在真实会话中用 `/skill:pdf-to-md` 跑通。压测见 [docs/M3-STRESS.md](docs/M3-STRESS.md)，阶段记录见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 两条硬约束（先看这个）
 
@@ -36,6 +36,25 @@ out/paper/
 └── _meta/          manifest / validation / completion / content_list
 ```
 
+## 安装（已装好，这里是复现方式）
+
+```bash
+ln -s /Users/xbpd/worktrees/pdf2zh/rewrite-v2/pdf-to-md ~/.pi/agent/skills/task/pdf-to-md
+# 重新加载 Pi 后，可用 /skill:pdf-to-md 显式调用，或直接描述任务让它自己路由
+```
+
+⚠️ 当前软链指向 `rewrite/v2` 分支的 worktree。合并到 `main` 后需要改指：
+`ln -sfn /Users/xbpd/Projects/pdf2zh/pdf-to-md ~/.pi/agent/skills/task/pdf-to-md`；
+删除该 worktree 会让软链失效。
+
+验证是否被 Pi 看见（用 Pi 自己的 loader，不是本地解析器）：
+
+```bash
+node ~/.pi/agent/skills/task/skill-authoring/scripts/skill_validator/pi_discover.mjs \
+  /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js \
+  ~/.pi/agent/skills/task pi | python3 -c "import json,sys; d=json.load(sys.stdin); print([s['name'] for s in d['skills']], len(d['diagnostics']))"
+```
+
 ## 实测结果（真实 PDF，16 页 / 5.2 MB）
 
 | 步骤 | 结果 |
@@ -48,6 +67,7 @@ out/paper/
 | 复用（完成标记 / OCR 缓存） | 均 0.13 s、**0 次外部调用** |
 | 失败隔离（4 份混入超页文件） | 3 成功 1 失败，退出码 1，失败者无交付目录 |
 | 翻译并发 1 → 8 | 102.2 s → 38.8 s（**2.6×**），端点 16 并发无 429 |
+| Pi 内真实调用（`/skill:pdf-to-md`） | 直接产出交付目录，模型报告与磁盘产物一致 |
 
 ## 目录
 
@@ -64,9 +84,10 @@ out/paper/
     ├── references/
     │   ├── mineru-api.md     # 官方文档整理稿（含来源与抓取时间）
     │   ├── output-contract.md# 九类校验码、命名、缓存与重跑
-    │   └── translation.md    # 模型参数、端点拼接、网关兼容、检查点
+    │   ├── translation.md    # 模型参数、端点拼接、网关兼容、检查点
+    │   └── troubleshooting.md # 现象 → 原因 → 处置
     ├── scripts/              # 零第三方依赖，Python 3.10+ 标准库
-    └── tests/                # 54 项离线用例
+    └── tests/                # 54 项离线用例 + trigger_check.py（需 --confirm）
 ```
 
 ## 验证
@@ -74,6 +95,10 @@ out/paper/
 ```bash
 # 离线测试（不需要网络与凭据）
 cd pdf-to-md && python3 -m unittest discover -s tests -t tests
+
+# 触发检查：静态描述检查 + 路由模拟（--confirm 才会发起 6 个短请求）
+python3 pdf-to-md/tests/trigger_check.py --dry-run
+python3 pdf-to-md/tests/trigger_check.py --confirm
 
 # skill 包结构校验（需要指向本机 Pi 安装位置）
 PI_CODING_AGENT_PACKAGE=/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent \

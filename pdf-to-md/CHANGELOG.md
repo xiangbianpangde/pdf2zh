@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 - 2026-10-28
+
+- M4 收口：新增 `references/troubleshooting.md`（凭据 / 解析 / 校验 / 翻译 / 重跑五类现象 → 原因 → 处置）。
+- `SKILL.md` 增加「报告格式」（成功三行、失败一句原因 + 影响 + 下一步），并指向 troubleshooting。
+- 新增 `tests/trigger_check.py`：静态描述检查 + 路由模拟（3 正例 / 3 反例），需要 `--confirm` 才发起真实模型请求。
+- 部署到 `~/.pi/agent/skills/task/pdf-to-md`（软链到本项目），Pi 自带 loader 检测到该技能、诊断数为 0。
+- 触发验证：静态检查 8/8 通过；路由模拟 6/6 命中（正例 3、反例 3）。
+
 ## 0.2.1 - 2026-10-28
 
 - M3 压测（`docs/M3-STRESS.md`）：flash 3 份并发 47.3 s；precision 2 份并发 26.5 s；失败隔离成立（4 份中 1 份超页失败，其余正常，失败者无交付目录）。

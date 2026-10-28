@@ -3,7 +3,7 @@ name: pdf-to-md
 description: Converts a local PDF into a self-contained Markdown delivery directory through the MinerU cloud API, preserving heading structure, tables, formulas and extracted figures, with optional Chinese translation through any OpenAI-compatible model. Use when asked to 把 PDF 转成 Markdown、论文转 md、要保留图片和公式的 PDF 解析、把英文论文翻译成中文并保留插图、用 MinerU 解析这份 PDF, or whenever a PDF must become portable Markdown plus an images/ folder. Do not use for docx/pptx/xlsx conversion, PDF layout reproduction, or merely reading, summarizing or answering questions about a paper.
 compatibility: Pi coding agent; Python 3.10+; network access to mineru.net and one OpenAI-compatible endpoint
 metadata:
-  version: "0.2.1"
+  version: "0.3.0"
   status: "active"
   layer: "task"
   priority: "45"
@@ -23,7 +23,7 @@ metadata:
 | 图片归一化 + 链接改写 + 硬校验 | ✅ 实测 67 张图、0 issue |
 | 可选翻译（任意 OpenAI 兼容端点） | ✅ 真实模型实测，中英图片序列一致 |
 | 批量、并发、OCR 缓存 | ✅ 压测通过：3 份并发 47 s，复用 0 次外部调用 |
-| 离线测试 | ✅ `python3 -m unittest discover -s tests -t tests` 45 项 |
+| 离线测试 | ✅ `python3 -m unittest discover -s tests -t tests` 54 项 |
 
 ## 什么时候用
 
@@ -97,7 +97,21 @@ python3 scripts/pdf2md.py /abs/paper.pdf --ocr flash
 | 翻译失败 | 英文与检查点已保留、`_zh.md` 未写；如需重试只需重跑同一命令 |
 | 端点 403 + `1010` | 是网关拦 UA，不是 key 问题；说明已固定 UA，让用户回报网关 |
 
+按代码查处置办法：`references/troubleshooting.md`。
+
 禁止：把半成品说成完成；把 flash 的纯文本说成「保留了图片」；没跑过就说通过。
+
+## 报告格式
+
+成功时只用三行：
+
+```
+交付：<out>/<stem>/           （截图式给出目录）
+校验：ok=true，图片 N 张，中英序列一致
+中文：<stem>_zh.md（未翻译则写「仅英文」）
+```
+
+失败时：一句原因（含错误码原文）+ 一句影响 + 一句下一步，不要贴整段日志。
 
 ## 证据边界
 
@@ -111,4 +125,5 @@ python3 scripts/pdf2md.py /abs/paper.pdf --ocr flash
 - `references/mineru-api.md` — 两套 API 的端点、参数、状态机、错误码、语言表、待实测项
 - `references/output-contract.md` — 目录、命名、图片规则、九类校验码、缓存与重跑
 - `references/translation.md` — 三个模型参数、端点拼接、网关兼容、分块、检查点、失败语义
+- `references/troubleshooting.md` — 现象 → 原因 → 处置（凭据、解析、校验、翻译、重跑）
 - `docs/PLAN.md` / `docs/ROADMAP.md`（仓库根）— 目标、范围、阶段门禁

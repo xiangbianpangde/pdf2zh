@@ -10,7 +10,7 @@
 | M1 单通道跑通 | ✅ 完成（真实 PDF 实测） |
 | M2 可选翻译 | ✅ 完成（真实模型实测） |
 | M3 批量与缓存 | ✅ 完成（压测见 `docs/M3-STRESS.md`） |
-| M4 Skill 收口 | ⬜ 下一步 |
+| M4 Skill 收口 | ✅ 完成（已部署并真实调用） |
 | M5 扩展 | ⬜ 未开始 |
 
 ## 里程碑总览
@@ -102,17 +102,19 @@
 - [ ] 单批 ≤50 按设计不使用（固定 1 文件/请求）
 - [ ] 可选：批量时镜像输入目录树（待用户确认）
 
-## M4 Skill 收口
+## M4 Skill 收口 ✅
 
-任务：
+结果：
 
-1. `SKILL.md` 定稿：触发边界（含 3 条反例）、决策流程、失败报告格式、证据边界
-2. `references/troubleshooting.md`：错误码 → 处置（对齐 `mineru-api.md` §2.9/§3.4）
-3. 触发正负测试：正例「把这篇论文转成 md 保留图片」「PDF 转 Markdown 并翻译成中文」；负例「docx 转 md」「解释这篇论文」「PDF 页面排版复刻」
-4. 跑 `python3 ~/.pi/agent/skills/task/skill-authoring/scripts/validate.py --strict pdf-to-md`，0 error 0 warning
-5. README 安装说明（复制/软链到 `~/.pi/agent/skills/task/pdf-to-md`）
+- [x] `SKILL.md` 定稿：触发边界（含 3 条反例）、通道判断、失败报告、报告格式、证据边界；description 544 字符
+- [x] `references/troubleshooting.md`：五类现象 → 原因 → 处置（凭据 / 解析 / 校验 / 翻译 / 重跑）
+- [x] `tests/trigger_check.py`：静态描述检查 8/8 + 路由模拟 6/6（正例 3、反例 3）
+- [x] 部署：软链 `~/.pi/agent/skills/task/pdf-to-md` → 本项目
+- [x] Pi 自带 loader（`loadSkillsFromDir`）：task/ 下 8 个技能、`pdf-to-md` 在内、**诊断 0 条**
+- [x] validator `--strict`：PASS，0 error 0 warning；`CHANGELOG.md` 有 0.3.0 段
+- [x] 真实调用：`pi -p "/skill:pdf-to-md …"` 跑通，产物落地（`validation.ok=true`、flash 通道、无中文），与模型报告一致
 
-门禁：validator 0/0；正负触发测试通过；`CHANGELOG.md` 有对应版本段。
+未做：真实模型路由只验证了「显式`/skill:` 调用」，没有做无提示的自由路由统计（模型口头列举技能不稳定，不作为证据）。
 
 ## M5 扩展（不阻塞主线）
 
