@@ -109,7 +109,7 @@
 - [x] `SKILL.md` 定稿：触发边界（含 3 条反例）、通道判断、失败报告、报告格式、证据边界；description 544 字符
 - [x] `references/troubleshooting.md`：五类现象 → 原因 → 处置（凭据 / 解析 / 校验 / 翻译 / 重跑）
 - [x] `tests/trigger_check.py`：静态描述检查 8/8 + 路由模拟 6/6（正例 3、反例 3）
-- [x] 部署：软链 `~/.pi/agent/skills/task/pdf-to-md` → 本项目
+- [x] 部署：软链 `~/.pi/agent/skills/pdf-to-md` → 本项目（skills 根目录，已随合并移除 `task/` 旧链接）
 - [x] Pi 自带 loader（`loadSkillsFromDir`）：task/ 下 8 个技能、`pdf-to-md` 在内、**诊断 0 条**
 - [x] validator `--strict`：PASS，0 error 0 warning；`CHANGELOG.md` 有 0.3.0 段
 - [x] 真实调用：`pi -p "/skill:pdf-to-md …"` 跑通，产物落地（`validation.ok=true`、flash 通道、无中文），与模型报告一致

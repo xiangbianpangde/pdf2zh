@@ -39,20 +39,18 @@ out/paper/
 ## 安装（已装好，这里是复现方式）
 
 ```bash
-ln -s /Users/xbpd/worktrees/pdf2zh/rewrite-v2/pdf-to-md ~/.pi/agent/skills/task/pdf-to-md
+ln -sfn /Users/xbpd/Projects/pdf2zh/pdf-to-md ~/.pi/agent/skills/pdf-to-md
 # 重新加载 Pi 后，可用 /skill:pdf-to-md 显式调用，或直接描述任务让它自己路由
 ```
 
-⚠️ 当前软链指向 `rewrite/v2` 分支的 worktree。合并到 `main` 后需要改指：
-`ln -sfn /Users/xbpd/Projects/pdf2zh/pdf-to-md ~/.pi/agent/skills/task/pdf-to-md`；
-删除该 worktree 会让软链失效。
+软链指向 **skills 根目录**（`~/.pi/agent/skills/pdf-to-md`），不是 `task/` 之类子目录；仓库 `main` 是唯一内容来源，改完代码无需重装。
 
 验证是否被 Pi 看见（用 Pi 自己的 loader，不是本地解析器）：
 
 ```bash
 node ~/.pi/agent/skills/task/skill-authoring/scripts/skill_validator/pi_discover.mjs \
   /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js \
-  ~/.pi/agent/skills/task pi | python3 -c "import json,sys; d=json.load(sys.stdin); print([s['name'] for s in d['skills']], len(d['diagnostics']))"
+  ~/.pi/agent/skills pi | python3 -c "import json,sys; d=json.load(sys.stdin); print([s['name'] for s in d['skills']], len(d['diagnostics']))"
 ```
 
 ## 实测结果（真实 PDF，16 页 / 5.2 MB）
