@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 - 2026-10-28
+
+- 修复可移植性缺陷（CI 发现）：未安装 Pillow 时，**截断的图片会被误判为有效**——旧逻辑只看文件头就放行。现在无 Pillow 时退化为容器完整性检查（PNG 的 IHDR/IDAT/IEND、JPEG 的 SOI/EOI、GIF trailer、WEBP/BMP 声明长度、TIFF IFD 偏移），`verified_by` 记为 `structure`；两条路径都会拒绝截断文件。
+- 新增 3 项用例固定该行为（在屏蔽 Pillow 的环境下运行，等价于 CI）；离线用例 54 → 57。
+- 恢复 GitHub Actions：从 `pdf-to-md/` 跑 compileall、57 项离线测试、真实中断续跑、退出码契约（无凭据 doctor → 1，用法错误 → 2）。
+
 ## 0.3.1 - 2026-10-28
 
 - 真实中断续跑验证：新增 `tests/resume_smoke.py`，用真实 SIGKILL 杀掉翻译中的 CLI 子进程后重跑同一命令——续跑请求数等于缺失块数，**已完成块 0 次重发**，在途块重发上限为 `--workers`（该边界已写入 `references/translation.md`）。

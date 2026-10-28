@@ -42,7 +42,7 @@
 | SVG 拒绝 `script`/`on*`/`foreignObject`/外部 `href`/DTD | 交付物要能安全打开 |
 | 只放 `images/`，不嵌套子目录 | Markdown 引用统一为 `images/<name>` |
 
-可选校验：环境里装了 Pillow 就用它做一次真实解码（`manifest.images[].verified_by = "pillow"`），没装则退化为文件头解析（`verified_by = "header"`）。**不强制依赖 Pillow。**
+可选解码：环境里装了 Pillow 就用它做一次真实解码（`manifest.images[].verified_by = "pillow"`）；没装则退化为**容器完整性检查**（`verified_by = "structure"`）——PNG 需有 IHDR/IDAT/IEND，JPEG 需有 SOI 且在尾部有 EOI，GIF 需有 trailer，WEBP/BMP 校验声明长度，TIFF 校验 IFD 偏移。截断文件在两条路径上都会被拒绝。**不强制依赖 Pillow。**
 
 ### 链接改写规则
 

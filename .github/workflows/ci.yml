@@ -23,7 +23,7 @@ jobs:
       - name: Byte-compile every module
         run: python3 -m compileall -q scripts tests
 
-      # 54 offline cases: image normalization, link rewriting, nine delivery
+      # 57 offline cases: image normalization, link rewriting, nine delivery
       # checks, chunk boundaries, checkpoint resume, CLI exit codes, retries
       # against a local stub. No credentials, no network.
       - name: Offline unit tests

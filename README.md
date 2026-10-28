@@ -87,7 +87,7 @@ node ~/.pi/agent/skills/task/skill-authoring/scripts/skill_validator/pi_discover
     │   ├── translation.md    # 模型参数、端点拼接、网关兼容、检查点
     │   └── troubleshooting.md # 现象 → 原因 → 处置
     ├── scripts/              # 零第三方依赖，Python 3.10+ 标准库
-    └── tests/                # 54 项离线用例 + resume_smoke.py / trigger_check.py（opt-in）
+    └── tests/                # 57 项离线用例 + resume_smoke.py / trigger_check.py（opt-in）
 ```
 
 ## 验证

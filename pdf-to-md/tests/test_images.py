@@ -4,6 +4,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import support
 from errors import ImageError
@@ -41,6 +42,41 @@ class CharacterisationTests(unittest.TestCase):
                             encoding="utf-8")
             info = images.inspect(path)
             self.assertEqual(info.mime, "image/svg+xml")
+
+
+class StdlibOnlyTests(unittest.TestCase):
+    """The bare-Python path must reject truncated files, not just odd headers.
+
+    CI runs without Pillow; these cases pin the behaviour that a header match
+    alone would let through.
+    """
+
+    def test_truncated_png_is_rejected_without_pillow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "broken.png"
+            # valid signature + IHDR, body cut off before IEND
+            path.write_bytes(support.png_bytes(16, 16)[:-6])
+            with patch.object(images, "_verify_with_pillow", return_value=False):
+                with self.assertRaises(ImageError) as case:
+                    images.inspect(path)
+            self.assertIn("截断", str(case.exception))
+
+    def test_valid_png_passes_without_pillow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.png"
+            path.write_bytes(support.png_bytes(16, 12))
+            with patch.object(images, "_verify_with_pillow", return_value=False):
+                info = images.inspect(path)
+            self.assertEqual(info.verifier, "structure")
+            self.assertEqual((info.width, info.height), (16, 12))
+
+    def test_truncated_gif_is_rejected_without_pillow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "broken.gif"
+            path.write_bytes(b"GIF89a" + b"\x10\x00\x10\x00" + b"junk")
+            with patch.object(images, "_verify_with_pillow", return_value=False):
+                with self.assertRaises(ImageError):
+                    images.inspect(path)
 
 
 class NormalizeTests(unittest.TestCase):

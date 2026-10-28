@@ -120,6 +120,50 @@ def _dimensions(fmt: str, raw: bytes) -> tuple[int | None, int | None]:
     return None, None
 
 
+def _structure_error(fmt: str, raw: bytes) -> str | None:
+    """Container-level completeness check, used when Pillow is unavailable.
+
+    Header sniffing alone accepts a file whose first bytes look right but whose
+    body is truncated; every format has a cheap end-marker or declared-length
+    field we can verify with the standard library.
+    """
+    size = len(raw)
+    if fmt == "PNG":
+        if size < 33 or raw[12:16] != b"IHDR":
+            return "PNG 缺少 IHDR"
+        if b"IDAT" not in raw:
+            return "PNG 缺少 IDAT"
+        if b"IEND" not in raw:
+            return "PNG 缺少 IEND（文件被截断）"
+        return None
+    if fmt == "JPEG":
+        if size < 4 or raw[:2] != b"\xff\xd8":
+            return "JPEG 缺少 SOI"
+        if raw.rfind(b"\xff\xd9") < size - 4096:
+            return "JPEG 缺少 EOI（文件被截断）"
+        return None
+    if fmt == "GIF":
+        if not raw.rstrip(b"\x00\r\n\t ").endswith(b"\x3b"):
+            return "GIF 缺少 trailer（文件被截断）"
+        return None
+    if fmt == "WEBP":
+        declared = int.from_bytes(raw[4:8], "little") + 8
+        if declared > size:
+            return "WEBP RIFF 长度超出文件（文件被截断）"
+        return None
+    if fmt == "BMP":
+        if int.from_bytes(raw[2:6], "little") > size:
+            return "BMP 声明长度超出文件（文件被截断）"
+        return None
+    if fmt == "TIFF":
+        order = "big" if raw[:2] == b"MM" else "little"
+        offset = int.from_bytes(raw[4:8], order)
+        if not 8 <= offset < size:
+            return "TIFF IFD 偏移越界（文件被截断）"
+        return None
+    return None
+
+
 def _verify_svg(raw: bytes) -> None:
     lowered = raw.lower()
     if b"<!doctype" in lowered or b"<!entity" in lowered or b"@import" in lowered or b"url(" in lowered:
@@ -175,9 +219,15 @@ def inspect(path: str | Path) -> ImageInfo:
     fmt = _sniff(raw)
     if fmt is None:
         raise ImageError(f"无法识别的图片编码：{target.name}")
+    if _verify_with_pillow(target):
+        verifier = "pillow"
+    else:
+        problem = _structure_error(fmt, raw)
+        if problem is not None:
+            raise ImageError(f"无法解码图片 {target.name}：{problem}")
+        verifier = "structure"
     mime, suffix = _MIME_BY_FORMAT[fmt]
     width, height = _dimensions(fmt, raw)
-    verifier = "pillow" if _verify_with_pillow(target) else "header"
     return ImageInfo(mime, suffix, width, height, len(raw), digest, verifier)
 
 

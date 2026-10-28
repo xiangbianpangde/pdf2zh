@@ -3,7 +3,7 @@ name: pdf-to-md
 description: Converts a local PDF into a self-contained Markdown delivery directory through the MinerU cloud API, preserving heading structure, tables, formulas and extracted figures, with optional Chinese translation through any OpenAI-compatible model. Use when asked to 把 PDF 转成 Markdown、论文转 md、要保留图片和公式的 PDF 解析、把英文论文翻译成中文并保留插图、用 MinerU 解析这份 PDF, or whenever a PDF must become portable Markdown plus an images/ folder. Do not use for docx/pptx/xlsx conversion, PDF layout reproduction, or merely reading, summarizing or answering questions about a paper.
 compatibility: Pi coding agent; Python 3.10+; network access to mineru.net and one OpenAI-compatible endpoint
 metadata:
-  version: "0.3.1"
+  version: "0.3.2"
   status: "active"
   layer: "task"
   priority: "45"
@@ -23,7 +23,7 @@ metadata:
 | 图片归一化 + 链接改写 + 硬校验 | ✅ 实测 67 张图、0 issue |
 | 可选翻译（任意 OpenAI 兼容端点） | ✅ 真实模型实测，中英图片序列一致 |
 | 批量、并发、OCR 缓存 | ✅ 8 份并发 44 s（串行 269 s），复用 0 次外部调用 |
-| 离线测试 | ✅ 54 项；另有两个 opt-in 脚本：`resume_smoke.py`（真实中断续跑）、`trigger_check.py`（触发） |
+| 离线测试 | ✅ 57 项；另有两个 opt-in 脚本：`resume_smoke.py`（真实中断续跑）、`trigger_check.py`（触发） |
 
 ## 什么时候用
 
