@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # The skill is the only thing in this repo that has tests.
+        working-directory: pdf-to-md
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python version
+        run: python3 -V
+
+      - name: Byte-compile every module
+        run: python3 -m compileall -q scripts tests
+
+      # 54 offline cases: image normalization, link rewriting, nine delivery
+      # checks, chunk boundaries, checkpoint resume, CLI exit codes, retries
+      # against a local stub. No credentials, no network.
+      - name: Offline unit tests
+        run: python3 -m unittest discover -s tests -t tests
+
+      # Starts the real CLI, SIGKILLs it mid-translation, restarts it and
+      # asserts only the missing chunks are re-requested.
+      - name: Real kill/resume smoke
+        run: python3 tests/resume_smoke.py
+
+      # Without credentials the doctor must report a problem and exit 1 rather
+      # than pretending success.
+      - name: Doctor without credentials exits 1
+        run: |
+          set +e
+          python3 scripts/pdf2md.py --doctor --offline
+          code=$?
+          echo "exit=$code"
+          test "$code" -eq 1
+
+      # Usage errors must be distinguishable from stage failures.
+      - name: Usage errors exit 2
+        run: |
+          set +e
+          python3 scripts/pdf2md.py >/dev/null 2>&1
+          test $? -eq 2
+          python3 scripts/pdf2md.py /nonexistent.pdf >/dev/null 2>&1
+          test $? -eq 2
